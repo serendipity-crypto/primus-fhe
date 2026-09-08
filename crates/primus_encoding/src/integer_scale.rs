@@ -7,47 +7,47 @@ use primus_modulus::common::uint::{reduce_add, reduce_neg};
 /// Constructors of the owning codec guarantee (t-1)*delta < q, so magnitude
 /// products fit one word and are canonical without modular multiplication.
 #[derive(Clone, Copy, Debug)]
-pub(super) enum IntegerScale<T: FheUint> {
-    Shift { shift: u32, q: Option<T> },
-    Multiply { delta: T, q: Option<T> },
+pub(super) struct IntegerScale<T: FheUint> {
+    q: Option<T>,
+    op: ScaleOp<T>,
+}
+
+/// Magnitude scaling selected at construction, independent of the modulus.
+#[derive(Clone, Copy, Debug)]
+enum ScaleOp<T> {
+    Shift { shift: u32 },
+    Multiply { delta: T },
 }
 
 impl<T: FheUint> IntegerScale<T> {
     pub(super) fn new(delta: T, q: Option<T>) -> Self {
-        if delta.is_power_of_two() {
-            Self::Shift {
+        let op = if delta.is_power_of_two() {
+            ScaleOp::Shift {
                 shift: delta.trailing_zeros(),
-                q,
             }
         } else {
-            Self::Multiply { delta, q }
-        }
+            ScaleOp::Multiply { delta }
+        };
+        Self { op, q }
     }
 
     #[inline]
-    fn modulus(&self) -> Option<T> {
-        match *self {
-            Self::Shift { q, .. } | Self::Multiply { q, .. } => q,
-        }
-    }
-
-    #[inline]
-    pub(super) fn encode_magnitude(&self, m: T, _t: T) -> T {
-        match *self {
-            Self::Shift { shift, .. } => m << shift,
-            Self::Multiply { delta, .. } => m * delta,
+    pub(super) fn encode_magnitude(&self, m: T) -> T {
+        match self.op {
+            ScaleOp::Shift { shift } => m << shift,
+            ScaleOp::Multiply { delta } => m * delta,
         }
     }
     #[inline]
     pub(super) fn neg(&self, value: T) -> T {
-        match self.modulus() {
+        match self.q {
             None => value.wrapping_neg(),
             Some(q) => reduce_neg(q, value),
         }
     }
     #[inline]
     pub(super) fn add_assign(&self, acc: &mut T, value: T) {
-        *acc = match self.modulus() {
+        *acc = match self.q {
             None => acc.wrapping_add(value),
             Some(q) => reduce_add(q, *acc, value),
         };
@@ -55,7 +55,8 @@ impl<T: FheUint> IntegerScale<T> {
 
     /// Applies scaling to validated messages, optionally adding to canonical output.
     /// The iterator also permits in-place encoding without allocating a copy.
-    #[inline]
+    // Keep dispatch inline so callers can specialize the scale and modulus.
+    #[inline(always)]
     pub(super) fn apply<'a, const ADD: bool, I>(
         &self,
         input: I,
@@ -65,7 +66,7 @@ impl<T: FheUint> IntegerScale<T> {
         I: Iterator<Item = (&'a mut T, T)>,
         T: 'a,
     {
-        match self.modulus() {
+        match self.q {
             None => self.apply_scale::<ADD, _, _, _>(
                 input,
                 t,
@@ -97,11 +98,11 @@ impl<T: FheUint> IntegerScale<T> {
         A: Fn(T, T) -> T,
         T: 'a,
     {
-        match *self {
-            Self::Shift { shift, .. } => {
+        match self.op {
+            ScaleOp::Shift { shift } => {
                 apply_kernel::<T, ADD, _, _, _, _>(input, t, embedding, |m| m << shift, neg, add);
             }
-            Self::Multiply { delta, .. } => {
+            ScaleOp::Multiply { delta } => {
                 apply_kernel::<T, ADD, _, _, _, _>(input, t, embedding, |m| m * delta, neg, add);
             }
         }

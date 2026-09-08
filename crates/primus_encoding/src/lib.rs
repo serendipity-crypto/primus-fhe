@@ -1,23 +1,28 @@
 //! Plaintext encoding and decoding for homomorphic encryption.
 //!
-//! Single-modulus codecs support native and explicit ciphertext moduli.
-//! The optional `rns` feature provides coefficient scaling and decoding over an
-//! RNS ciphertext basis. These codecs do not implement integer slot packing or
-//! CKKS canonical embedding.
+//! [`RoundedCodec`] rounds each scaled message; [`ScaledCodec`] uses a fixed
+//! rounded integer scale. Both support native and explicit ciphertext moduli.
+//! The optional `rns` feature provides BFV coefficient scaling and decoding over
+//! an RNS ciphertext basis. Public types are available at the crate root.
+//! These codecs do not implement integer slot packing or CKKS canonical embedding.
 //!
 //! The `simd` feature enables nightly SIMD arithmetic in dependencies.
 
 #![deny(missing_docs)]
 
-/// Encoding and decoding under one native or explicit ciphertext modulus.
-pub mod single_modulus;
-pub use single_modulus::{RoundedCodec, ScaledCodec};
+mod decode;
+mod helpers;
+mod integer_scale;
+mod rounded;
+mod scaled;
 
-/// RNS coefficient encoding and decoding.
+pub use rounded::RoundedCodec;
+pub use scaled::ScaledCodec;
+
 #[cfg(feature = "rns")]
-pub mod rns;
+mod bfv_rns;
 #[cfg(feature = "rns")]
-pub use rns::BfvRnsCodec;
+pub use bfv_rns::BfvRnsCodec;
 
 /// Plaintext embedding used when lifting residues from `Z_t` into the ciphertext modulus.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

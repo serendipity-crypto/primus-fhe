@@ -12,7 +12,7 @@ Primus FHE 的明文系数编码与解码。
 | `ScaledCodec<T>` | `lift(m)*round(q/t) mod q` | 单模数 GLWE/NTRU |
 | `BfvRnsCodec<T,M>` | `lift(m)*floor(Q/t) mod Q` | RNS 系数缩放（`rns` feature） |
 
-所有类型均在 crate 根部重导出。单模数编码器用 `None` 表示原生模数
+公开类型直接从 crate 根部导出，实现模块保持私有。单模数编码器用 `None` 表示原生模数
 `2^T::BITS`。两个公开编码器互相独立，复用私有的整数缩放与解码内核。
 `t` 整除 `q` 时，两者都使用精确整数尺度 `q/t`；否则 `RoundedCodec`
 对每个缩放消息舍入，`ScaledCodec` 使用统一的舍入整数尺度。
@@ -56,6 +56,16 @@ RNS 编码输出系数域 `CrtPolynomial`，调用方单独执行 NTT 转换。
 单模数切片方法使用 `_to` 表示独立输出，`_assign` 表示原地更新。RNS 使用
 `encode_coeffs_to`、`add_encode_coeffs_assign` 和 `decode_coeffs_to`，从明文
 切片推导多项式长度。批量编码在写入前检查消息范围和精确长度。
+
+## 源码结构
+
+- `rounded.rs` 和 `scaled.rs`：两个单模数编码器及其 API。
+- `integer_scale.rs`、`decode.rs` 和 `helpers.rs`：共享的私有内核与边界辅助函数。
+- `bfv_rns/`：BFV RNS 编码器；`mod.rs` 管理参数和构造，`encode.rs` 实现编码与累加，
+  `decode.rs` 实现解码及其工作区契约。
+
+测试分别覆盖 API 一致性、独立算术 oracle 和 BFV RNS 契约。
+`benches/plaintext_codec.rs` 包含编码器基准。
 
 ## Feature
 

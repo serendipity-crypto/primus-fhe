@@ -1,17 +1,14 @@
+//! Shared nearest-cell decoding for `RoundedCodec` and `ScaledCodec`.
+
 use super::helpers::{centered_half, mul_div_round, narrow_mul_div_round, try_from_decoded};
 use primus_integer::FheUint;
 
-/// Parameters for nearest-cell decoding, independent of the encoding convention.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct DecodeParams<T: FheUint> {
-    t: T,
-    strategy: DecodeStrategy<T>,
-}
-
 /// Arithmetic selected for `round(c*t/q) mod t`, with canonical `c` and ties upward.
 /// Exact divisibility takes precedence over native/explicit modulus dispatch.
+/// The owning codec supplies the same `t` used to construct this strategy to
+/// every decoding operation, independently of its encoding convention.
 #[derive(Clone, Copy, Debug)]
-enum DecodeStrategy<T: FheUint> {
+pub(super) enum DecodeStrategy<T: FheUint> {
     /// `t` divides `q` and `q/t = 2^shift`; stores `shift >= 1`.
     /// Decodes by rounding `c / 2^shift`, then reducing modulo `t`.
     /// Both moduli being powers of two is the common case, but not required
@@ -34,56 +31,54 @@ enum DecodeStrategy<T: FheUint> {
     Wide(T),
 }
 
-impl<T: FheUint> DecodeParams<T> {
+impl<T: FheUint> DecodeStrategy<T> {
     /// Uses a validated modulus pair and its exact quotient/remainder.
     pub(super) fn from_ratio(t: T, q: Option<T>, delta: T, remainder: T) -> Self {
-        let strategy = if remainder == T::ZERO {
+        if remainder == T::ZERO {
             if delta.is_power_of_two() {
-                DecodeStrategy::Shift(delta.trailing_zeros())
+                Self::Shift(delta.trailing_zeros())
             } else {
-                DecodeStrategy::Divide(delta)
+                Self::Divide(delta)
             }
         } else {
             match q {
-                None => DecodeStrategy::Native,
-                Some(q) if q.checked_mul(t).is_some() => DecodeStrategy::Narrow(q),
-                Some(q) => DecodeStrategy::Wide(q),
+                None => Self::Native,
+                Some(q) if q.checked_mul(t).is_some() => Self::Narrow(q),
+                Some(q) => Self::Wide(q),
             }
-        };
-        Self { t, strategy }
+        }
     }
 
     #[inline]
-    pub(super) fn value<M: TryFrom<T>>(&self, value: T) -> M {
+    pub(super) fn value<M: TryFrom<T>>(&self, value: T, t: T) -> M {
         let mut output = T::ZERO;
-        self.apply(core::iter::once((value, &mut output)));
+        self.apply(core::iter::once((value, &mut output)), t);
         try_from_decoded(output)
     }
 
     #[inline]
-    pub(super) fn assign(&self, values: &mut [T]) {
-        self.apply(values.iter_mut().map(|out| (*out, out)));
+    pub(super) fn assign(&self, values: &mut [T], t: T) {
+        self.apply(values.iter_mut().map(|out| (*out, out)), t);
     }
 
     #[inline]
-    pub(super) fn to<M: TryFrom<T>>(&self, input: &[T], output: &mut [M]) {
+    pub(super) fn to<M: TryFrom<T>>(&self, input: &[T], output: &mut [M], t: T) {
         assert_eq!(input.len(), output.len(), "decoding slice length mismatch");
-        self.apply(input.iter().copied().zip(output));
+        self.apply(input.iter().copied().zip(output), t);
     }
 
     // All phases are canonical. Raw rounding lies in [0,t]; select reduction
     // outside the loop and avoid an overflowing c + delta/2 intermediate.
     #[inline]
-    fn apply<'a, M: TryFrom<T> + 'a, I: Iterator<Item = (T, &'a mut M)>>(&self, input: I) {
-        let t = self.t;
-        match self.strategy {
-            DecodeStrategy::Shift(shift) if t.is_power_of_two() => map(input, |c| {
+    fn apply<'a, M: TryFrom<T> + 'a, I: Iterator<Item = (T, &'a mut M)>>(&self, input: I, t: T) {
+        match *self {
+            Self::Shift(shift) if t.is_power_of_two() => map(input, |c| {
                 ((c >> shift) + ((c >> (shift - 1)) & T::ONE)) & (t - T::ONE)
             }),
-            DecodeStrategy::Shift(shift) => map(input, |c| {
+            Self::Shift(shift) => map(input, |c| {
                 canonical((c >> shift) + ((c >> (shift - 1)) & T::ONE), t)
             }),
-            DecodeStrategy::Divide(delta) => map(input, |c| {
+            Self::Divide(delta) => map(input, |c| {
                 let (d, r) = c.div_rem(delta);
                 canonical(
                     d + if r >= centered_half(delta) {
@@ -94,13 +89,11 @@ impl<T: FheUint> DecodeParams<T> {
                     t,
                 )
             }),
-            DecodeStrategy::Native => map(input, |c| {
+            Self::Native => map(input, |c| {
                 canonical(c.carrying_mul_hw(t, T::ONE << (T::BITS - 1)), t)
             }),
-            DecodeStrategy::Narrow(q) => {
-                map(input, |c| canonical(narrow_mul_div_round(c, t, q), t))
-            }
-            DecodeStrategy::Wide(q) => map(input, |c| canonical(mul_div_round(c, t, q), t)),
+            Self::Narrow(q) => map(input, |c| canonical(narrow_mul_div_round(c, t, q), t)),
+            Self::Wide(q) => map(input, |c| canonical(mul_div_round(c, t, q), t)),
         }
     }
 }

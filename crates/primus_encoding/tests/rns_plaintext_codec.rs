@@ -6,7 +6,7 @@ use primus_poly::{CrtPolynomial, Polynomial};
 use primus_rns::RNSBase;
 
 #[test]
-fn decodes_without_t_gamma_workspace() {
+fn multiword_modulus_roundtrip() {
     type ValueT = u64;
 
     let moduli_value: [ValueT; 2] = [1125899906826241, 1125899906629633];
@@ -29,15 +29,11 @@ fn decodes_without_t_gamma_workspace() {
         primus_encoding::PlaintextEmbedding::Centered,
     );
 
-    let mut fused_q = CrtPolynomial::new(encoded.into_owned());
-    let mut fused_decoded: Polynomial<Vec<ValueT>> = Polynomial::<Vec<u64>>::zero(poly_length);
-    let mut fused_fast_convert_buffer = vec![0; rns_poly_len];
-    codec.decode_coeffs_to(
-        &mut fused_q,
-        &mut fused_decoded,
-        &mut fused_fast_convert_buffer,
-    );
-    assert_eq!(fused_decoded.as_ref(), input_values);
+    let mut phase = CrtPolynomial::new(encoded.into_owned());
+    let mut decoded: Polynomial<Vec<ValueT>> = Polynomial::<Vec<u64>>::zero(poly_length);
+    let mut scratch = vec![0; rns_poly_len];
+    codec.decode_coeffs_to(&mut phase, &mut decoded, &mut scratch);
+    assert_eq!(decoded.as_ref(), input_values);
 }
 
 #[test]

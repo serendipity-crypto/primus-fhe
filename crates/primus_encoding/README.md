@@ -12,7 +12,8 @@ Plaintext coefficient encoding and decoding for Primus FHE.
 | `ScaledCodec<T>` | `lift(m)*round(q/t) mod q` | Single-modulus GLWE/NTRU |
 | `BfvRnsCodec<T,M>` | `lift(m)*floor(Q/t) mod Q` | RNS coefficient scaling (`rns` feature) |
 
-All types are re-exported at the crate root. The single-modulus codecs accept
+Public types are available directly at the crate root; implementation modules
+are private. The single-modulus codecs accept
 `None` for the native modulus `2^T::BITS`. The two public codecs are independent;
 they share private integer-scaling and decoding kernels. When `t` divides `q`,
 both encode with the exact integer scale `q/t`. Otherwise `RoundedCodec` rounds
@@ -67,6 +68,18 @@ Single-modulus slice methods use `_to` for separate output and `_assign` for
 in-place updates. RNS uses `encode_coeffs_to`, `add_encode_coeffs_assign`, and
 `decode_coeffs_to`; polynomial length is inferred from the plaintext slice.
 Batch encoding validates message ranges and exact lengths before writing.
+
+## Source layout
+
+- `rounded.rs` and `scaled.rs`: the two single-modulus codecs and their APIs.
+- `integer_scale.rs`, `decode.rs`, and `helpers.rs`: shared private kernels and
+  boundary helpers.
+- `bfv_rns/`: the BFV RNS codec; `mod.rs` owns parameters and construction,
+  `encode.rs` implements encoding and accumulation, and `decode.rs` implements
+  decoding and its workspace contract.
+
+Tests cover API consistency, independent arithmetic oracles, and BFV RNS
+contracts. `benches/plaintext_codec.rs` contains the codec benchmarks.
 
 ## Features
 

@@ -50,10 +50,10 @@ fn bench_plaintext_codec_u64(c: &mut Criterion) {
         BenchmarkId::new("decode_slice/rounded_explicit", BATCH_LEN),
         &ciphertexts,
         |b, ciphertexts| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || black_box(ciphertexts).clone(),
-                |mut values| {
-                    rounded_codec.decode_slice_assign(&mut values);
+                |values| {
+                    rounded_codec.decode_slice_assign(values);
                     black_box(values);
                 },
                 BatchSize::SmallInput,
@@ -65,10 +65,10 @@ fn bench_plaintext_codec_u64(c: &mut Criterion) {
         BenchmarkId::new("decode_slice/rounded_native", BATCH_LEN),
         &ciphertexts,
         |b, ciphertexts| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || black_box(ciphertexts).clone(),
-                |mut values| {
-                    native_rounded_codec.decode_slice_assign(&mut values);
+                |values| {
+                    native_rounded_codec.decode_slice_assign(values);
                     black_box(values);
                 },
                 BatchSize::SmallInput,
@@ -111,11 +111,11 @@ fn bench_plaintext_codec_u64(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("add_encode_scaled_slice/centered", BATCH_LEN),
         |b| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || black_box(&accumulator).clone(),
-                |mut acc| {
+                |acc| {
                     fixed_codec.add_encode_slice_assign(
-                        &mut acc,
+                        acc,
                         black_box(&centered_messages),
                         PlaintextEmbedding::Centered,
                     );
@@ -143,10 +143,10 @@ fn bench_plaintext_codec_u32(c: &mut Criterion) {
         BenchmarkId::new("decode_slice/rounded_explicit", BATCH_LEN),
         &ciphertexts,
         |b, ciphertexts| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || black_box(ciphertexts).clone(),
-                |mut values| {
-                    rounded_codec.decode_slice_assign(&mut values);
+                |values| {
+                    rounded_codec.decode_slice_assign(values);
                     black_box(values);
                 },
                 BatchSize::SmallInput,
@@ -186,6 +186,70 @@ fn bench_power_of_two(c: &mut Criterion) {
                 );
             })
         });
+    }
+    group.finish();
+}
+
+// Scalar and short batches expose dispatch overhead; long batches exercise kernels.
+fn bench_dispatch(c: &mut Criterion) {
+    let mut group = c.benchmark_group("plaintext_codec/u64/dispatch");
+    for (name, t, q) in [
+        ("shift", 256, Some(1u64 << 63)),
+        ("divide", 9, Some(45)),
+        ("wide", 12289, Some(u64::MAX - 58)),
+    ] {
+        let codec = RoundedCodec::new(t, q);
+        let scaled = ScaledCodec::new(t, q);
+        group.bench_function(format!("{name}/decode_value"), |b| {
+            b.iter(|| black_box(&codec).decode_value::<u64>(black_box(1)))
+        });
+        group.bench_function(format!("{name}/encode_value"), |b| {
+            b.iter(|| {
+                black_box(&codec).encode_value(black_box(t - 1), PlaintextEmbedding::Centered)
+            })
+        });
+        group.bench_function(format!("{name}/add_encode_value"), |b| {
+            b.iter_batched_ref(
+                || q.unwrap_or(u64::MAX) - 1,
+                |acc| {
+                    black_box(&codec).add_encode_value_assign(
+                        acc,
+                        black_box(t - 1),
+                        PlaintextEmbedding::Centered,
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+        for len in [16, BATCH_LEN] {
+            let messages: Vec<_> = (0..len).map(|i| i as u64 % t).collect();
+            let mut output = vec![0; len];
+            group.bench_function(BenchmarkId::new(format!("{name}/encode"), len), |b| {
+                b.iter(|| {
+                    black_box(&codec).encode_slice_to(
+                        black_box(&messages),
+                        black_box(&mut output),
+                        PlaintextEmbedding::Centered,
+                    )
+                })
+            });
+            group.bench_function(BenchmarkId::new(format!("{name}/decode"), len), |b| {
+                b.iter(|| {
+                    black_box(&codec).decode_slice_to(black_box(&messages), black_box(&mut output))
+                })
+            });
+            if name == "shift" {
+                group.bench_function(BenchmarkId::new("shift/scaled_encode", len), |b| {
+                    b.iter(|| {
+                        black_box(&scaled).encode_slice_to(
+                            black_box(&messages),
+                            black_box(&mut output),
+                            PlaintextEmbedding::Centered,
+                        )
+                    })
+                });
+            }
+        }
     }
     group.finish();
 }
@@ -247,6 +311,7 @@ criterion_group!(
     bench_plaintext_codec_u64,
     bench_plaintext_codec_u32,
     bench_power_of_two,
-    bench_rns
+    bench_rns,
+    bench_dispatch
 );
 criterion_main!(benches);

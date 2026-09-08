@@ -2,8 +2,11 @@ use primus_encoding::{PlaintextEmbedding, RoundedCodec, ScaledCodec};
 use primus_integer::FheUint;
 
 fn message_values<T: FheUint>(t: T) -> Vec<T> {
-    let len: usize = t.try_into().unwrap();
-    (0..len).map(|value| T::try_from(value).unwrap()).collect()
+    let half = (t >> 1u32) + (t & T::ONE);
+    let mut messages = vec![T::ZERO, T::ONE, half - T::ONE, half, t - T::ONE];
+    messages.sort_unstable();
+    messages.dedup();
+    messages
 }
 
 fn assert_codec_roundtrip<T: FheUint>(codec: RoundedCodec<T>, t: T, q: Option<T>) {
@@ -16,7 +19,9 @@ fn assert_codec_roundtrip<T: FheUint>(codec: RoundedCodec<T>, t: T, q: Option<T>
 
         for (&message, &encoded_value) in messages.iter().zip(&encoded) {
             assert_eq!(codec.encode_value(message, embedding), encoded_value);
-            assert_eq!(codec.decode_value::<T>(encoded_value), message);
+            let mut scalar_acc = T::ZERO;
+            codec.add_encode_value_assign(&mut scalar_acc, message, embedding);
+            assert_eq!(scalar_acc, encoded_value);
         }
 
         let mut decoded = vec![T::ZERO; messages.len()];
@@ -48,14 +53,15 @@ fn assert_codec_roundtrip<T: FheUint>(codec: RoundedCodec<T>, t: T, q: Option<T>
 }
 
 #[test]
-fn scaled_narrow_roundtrip_near_product_limit() {
+fn rounded_product_width_boundary() {
     let t = 12_289u64;
     let q = u64::MAX / t;
     assert!(q.checked_mul(t).is_some());
     assert!(q.checked_add(1).unwrap().checked_mul(t).is_none());
 
-    let narrow = RoundedCodec::new(t, Some(q));
-    assert_codec_roundtrip(narrow, t, Some(q));
+    for q in [q, q + 1] {
+        assert_codec_roundtrip(RoundedCodec::new(t, Some(q)), t, Some(q));
+    }
 }
 
 fn check_profiles<T: FheUint + TryFrom<u64>>(scaled_t: u64, narrow_q: u64, wide_q: u64) {

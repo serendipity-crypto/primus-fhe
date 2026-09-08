@@ -1,7 +1,7 @@
 use super::{
-    decode::DecodeParams,
+    decode::DecodeStrategy,
     helpers::{centered_half, checked_message, lift_centered_from_raw, modulus_div_rem},
-    scale::IntegerScale,
+    integer_scale::IntegerScale,
 };
 use crate::PlaintextEmbedding;
 use primus_integer::FheUint;
@@ -16,7 +16,7 @@ use primus_integer::FheUint;
 #[derive(Clone, Copy, Debug)]
 pub struct ScaledCodec<T: FheUint> {
     t: T,
-    decoder: DecodeParams<T>,
+    decoder: DecodeStrategy<T>,
     scale: IntegerScale<T>,
 }
 
@@ -30,7 +30,7 @@ impl<T: FheUint> ScaledCodec<T> {
     #[must_use]
     pub fn new(t: T, q: Option<T>) -> Self {
         let (floor, remainder) = modulus_div_rem(t, q);
-        let decoder = DecodeParams::from_ratio(t, q, floor, remainder);
+        let decoder = DecodeStrategy::from_ratio(t, q, floor, remainder);
         let delta = floor
             + if remainder >= centered_half(t) {
                 T::ONE
@@ -82,7 +82,7 @@ impl<T: FheUint> ScaledCodec<T> {
                 lift_centered_from_raw(message, self.t(), super::helpers::centered_half(self.t()))
             }
         };
-        let value = self.scale.encode_magnitude(m, self.t);
+        let value = self.scale.encode_magnitude(m);
         if negative {
             self.scale.neg(value)
         } else {
@@ -150,17 +150,17 @@ impl<T: FheUint> ScaledCodec<T> {
     #[must_use]
     #[inline]
     pub fn decode_value<M: TryFrom<T>>(&self, value: T) -> M {
-        self.decoder.value(value)
+        self.decoder.value(value, self.t)
     }
 
     /// Decodes canonical ciphertext residues in place.
     pub fn decode_slice_assign(&self, values: &mut [T]) {
-        self.decoder.assign(values);
+        self.decoder.assign(values, self.t);
     }
 
     /// Decodes canonical ciphertext residues into an equally sized output slice.
     /// Panics on a length mismatch or if `M` cannot hold a result.
     pub fn decode_slice_to<M: TryFrom<T>>(&self, input: &[T], output: &mut [M]) {
-        self.decoder.to(input, output);
+        self.decoder.to(input, output, self.t);
     }
 }

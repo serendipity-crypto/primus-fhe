@@ -204,6 +204,9 @@ fn small_moduli_and_nonzero_accumulators() {
                     encode_exact_oracle(u128::from(*m), u128::from(t), u128::from(q), embedding)
                         as u64;
                 assert_eq!(value, (q - 1 + expected) % q);
+                let mut scalar_acc = q - 1;
+                codec.add_encode_value_assign(&mut scalar_acc, *m, embedding);
+                assert_eq!(scalar_acc, value);
                 assert_eq!(codec.decode_value::<u64>(expected), *m);
             }
             if let Some(scaled) = scaled {
@@ -222,18 +225,18 @@ fn small_moduli_and_nonzero_accumulators() {
                     assert_eq!(rounded, expected);
                 }
             }
-            for phase in 0..q {
-                if let Some(scaled) = scaled {
-                    assert_eq!(
-                        scaled.decode_value::<u64>(phase),
-                        decode_oracle(phase.into(), t.into(), q.into()) as u64
-                    );
-                }
+        }
+        for phase in 0..q {
+            if let Some(scaled) = scaled {
                 assert_eq!(
-                    codec.decode_value::<u64>(phase),
+                    scaled.decode_value::<u64>(phase),
                     decode_oracle(phase.into(), t.into(), q.into()) as u64
                 );
             }
+            assert_eq!(
+                codec.decode_value::<u64>(phase),
+                decode_oracle(phase.into(), t.into(), q.into()) as u64
+            );
         }
     }
     let codec = RoundedCodec::new(1u16 << 15, None);
@@ -247,6 +250,16 @@ fn rejects_out_of_domain_messages_before_batch_writes() {
     let rounded = RoundedCodec::new(7u64, Some(131));
     let scaled = ScaledCodec::new(7u64, Some(131));
     for embedding in [PlaintextEmbedding::Unsigned, PlaintextEmbedding::Centered] {
+        let mut output = [1, 2];
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| rounded.add_encode_slice_assign(
+                &mut output,
+                &[0i32, -1],
+                embedding
+            )))
+            .is_err()
+        );
+        assert_eq!(output, [1, 2]);
         for m in [7, 8, u64::MAX] {
             assert!(catch_unwind(|| rounded.encode_value(m, embedding)).is_err());
             assert!(catch_unwind(|| scaled.encode_value(m, embedding)).is_err());
