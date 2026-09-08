@@ -1,7 +1,7 @@
 use super::helpers::{centered_half, lift_centered_from_raw};
 use crate::PlaintextEmbedding;
 use primus_integer::FheUint;
-use primus_modulus::common::uint::{reduce_add, reduce_neg};
+use primus_modulus::common::uint::reduce_add;
 
 /// Integer scaling shared by fixed-scale encoding and exact q/t encoding.
 /// Constructors of the owning codec guarantee (t-1)*delta < q, so magnitude
@@ -38,11 +38,13 @@ impl<T: FheUint> IntegerScale<T> {
             ScaleOp::Multiply { delta } => m * delta,
         }
     }
+    /// Negative lifts have positive magnitude and hence a nonzero scaled value.
     #[inline]
-    pub(super) fn neg(&self, value: T) -> T {
+    pub(super) fn neg_nonzero(&self, value: T) -> T {
+        debug_assert!(value != T::ZERO);
         match self.q {
             None => value.wrapping_neg(),
-            Some(q) => reduce_neg(q, value),
+            Some(q) => q - value,
         }
     }
     #[inline]
@@ -78,7 +80,7 @@ impl<T: FheUint> IntegerScale<T> {
                 input,
                 t,
                 embedding,
-                |x| reduce_neg(q, x),
+                |x| q - x,
                 |a, b| reduce_add(q, a, b),
             ),
         }
@@ -110,6 +112,7 @@ impl<T: FheUint> IntegerScale<T> {
 }
 
 /// Modulus, scale and embedding dispatch is performed before entering the loop.
+/// The negation callback is only applied to encodings of positive magnitudes.
 #[inline]
 fn apply_kernel<'a, T: FheUint + 'a, const ADD: bool, I, E, N, A>(
     input: I,

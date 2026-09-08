@@ -3,7 +3,7 @@
 mod decode;
 mod encode;
 
-use primus_factor::ShoupFactor;
+use primus_factor::{FactorMul, ShoupFactor};
 use primus_integer::{BigUint, DivRemScalar, FheUint, multiply_many_values};
 use primus_reduce::FieldContext;
 use primus_rns::{BaseConverter, RNSBase, ResidueFactors};
@@ -29,10 +29,12 @@ where
 
     // For decoding: HPS γ-trick, produces m mod t
     gamma: T,
-    t_gamma: [M; 2],                                           // {t, γ}
+    t_modulus: M,
     t_gamma_factor_mod_q: ResidueFactors<Vec<ShoupFactor<T>>>, // [(t·γ) mod q_i]
-    minus_inv_q_mod_t_gamma: [T; 2],                           // [(−Q^{-1}) mod m_j], m_j ∈ {t, γ}
-    inv_gamma_mod_t: ShoupFactor<T>,                           // (γ^{-1}) mod t
+    // The t factor includes the final division by γ; the γ factor recovers
+    // the centered correction before that division.
+    decode_factor_mod_t_gamma: [ShoupFactor<T>; 2], // {−(Qγ)^−1 mod t, −Q^−1 mod γ}
+    inv_gamma_mod_t: ShoupFactor<T>,                // γ^−1 mod t
     converter_q_to_t_gamma: BaseConverter<T, M>,
 }
 
@@ -85,10 +87,17 @@ where
         let t_gamma = [t_modulus, gamma_modulus];
         let base_t_gamma = RNSBase::new(&t_gamma).unwrap();
         let q_mod_t_gamma = base_t_gamma.decompose(cipher_modulus.view());
-        let minus_inv_q_mod_t_gamma = core::array::from_fn(|i| {
+        let minus_inv_q_mod_t_gamma: [T; 2] = core::array::from_fn(|i| {
             t_gamma[i].reduce_neg(t_gamma[i].reduce_inv(q_mod_t_gamma.as_ref()[i]))
         });
         let inv_gamma_mod_t = ShoupFactor::new(t_modulus.reduce_inv(t_modulus.reduce(gamma)), t);
+        let decode_factor_mod_t_gamma = [
+            ShoupFactor::new(
+                inv_gamma_mod_t.factor_mul_modulo(minus_inv_q_mod_t_gamma[0], t),
+                t,
+            ),
+            ShoupFactor::new(minus_inv_q_mod_t_gamma[1], gamma),
+        ];
         let t_gamma_value = multiply_many_values(&[t, gamma]);
         let t_gamma_factor_mod_q = base_q.decompose_factors(t_gamma_value.view());
 
@@ -101,9 +110,9 @@ where
             delta,
             delta_factor_mod_q,
             gamma,
-            t_gamma,
+            t_modulus,
             t_gamma_factor_mod_q,
-            minus_inv_q_mod_t_gamma,
+            decode_factor_mod_t_gamma,
             inv_gamma_mod_t,
             converter_q_to_t_gamma,
         }

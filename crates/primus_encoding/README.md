@@ -24,6 +24,10 @@ one-word multiplication otherwise. The fixed-scale constructor's recovery bound
 guarantees `(t-1)*delta < q`, so magnitude encoding needs no modular product.
 Centered negation and accumulation still use the ciphertext modulus.
 
+For non-integral ratios, rounded encoding decomposes `q = a*t + r` and computes
+`m*a + floor((m*r + floor(t/2))/t)` on the message magnitude when the biased
+residual product fits one word. Otherwise it retains wide arithmetic.
+
 Decoding uses `round(c/delta) mod t` only when `t` divides `q`; a power-of-two
 rounded scale alone does not imply this identity. Other parameters use the
 native high-product or explicit narrow/wide ratio kernels. All batch arithmetic
@@ -62,6 +66,7 @@ For phase `delta*m+e`, a sufficient decode bound is
 RNS encoding produces coefficient-domain `CrtPolynomial` data; callers perform
 NTT conversions separately. `decode_coeffs_to` overwrites its coefficient-domain
 input and needs exactly `decode_scratch_len(output.len())` scratch elements.
+This is zero for a single-modulus basis and one RNS polynomial for other bases.
 The codec is a BFV building block, not a complete BFV scheme.
 
 Single-modulus slice methods use `_to` for separate output and `_assign` for
@@ -79,7 +84,11 @@ Batch encoding validates message ranges and exact lengths before writing.
   decoding and its workspace contract.
 
 Tests cover API consistency, independent arithmetic oracles, and BFV RNS
-contracts. `benches/plaintext_codec.rs` contains the codec benchmarks.
+contracts. `benches/plaintext_codec.rs` measures single-modulus arithmetic and
+scalar dispatch; `benches/bfv_rns.rs` measures RNS accumulation and decoding.
+Inputs span both centered halves and each ciphertext modulus. Codecs and reusable
+buffers are outside timing; destructive decode inputs are restored in fixed batches.
+Throughput counts plaintext coefficients, with the RNS limb count in case names.
 
 ## Features
 
@@ -94,4 +103,5 @@ cargo test -p primus_encoding
 cargo test -p primus_encoding --features rns
 cargo +nightly test -p primus_encoding --features rns,simd
 cargo bench -p primus_encoding --bench plaintext_codec
+cargo bench -p primus_encoding --bench bfv_rns --features rns
 ```

@@ -179,6 +179,55 @@ fn explicit_u64_matches_u128_oracle() {
 }
 
 #[test]
+fn rounded_remainder_width_boundary_and_wide_fallback() {
+    fn check<T: FheUint + Into<u128> + TryFrom<u128>>() {
+        let native = 1u128 << T::BITS;
+        let root = 1u128 << (T::BITS / 2);
+        let t = root + 1;
+        // The adjacent remainders make (t-1)*r respectively fit and overflow T.
+        assert!((t - 1) * ((3 * root + 1) % t) < native);
+        assert_eq!((t - 1) * ((3 * root + 2) % t), native);
+        // Here the residual product fits exactly, but adding the rounding bias
+        // would overflow; construction must choose the wide fallback.
+        assert_eq!((root + 1) * (root - 1), native - 1);
+        for (t, q) in [
+            (t, 3 * root + 1),
+            (t, 3 * root + 2),
+            (root + 2, 3 * root + 3),
+            (native / 2 + 1, native),
+            (native / 2 + 1, native - 1),
+        ] {
+            let codec = RoundedCodec::<T>::new(to_value(t), (q != native).then(|| to_value(q)));
+            let messages: Vec<T> = [0, 1, t / 2, t.div_ceil(2), t - 1].map(to_value).to_vec();
+            for embedding in [PlaintextEmbedding::Unsigned, PlaintextEmbedding::Centered] {
+                let expected: Vec<T> = messages
+                    .iter()
+                    .map(|&m| to_value(encode_exact_oracle(m.into(), t, q, embedding)))
+                    .collect();
+                let mut output = vec![T::ZERO; messages.len()];
+                codec.encode_slice_to(&messages, &mut output, embedding);
+                assert_eq!(output, expected);
+                let mut inplace = messages.clone();
+                codec.encode_slice_assign(&mut inplace, embedding);
+                assert_eq!(inplace, expected);
+                let mut acc = vec![to_value(q - 1); messages.len()];
+                codec.add_encode_slice_assign(&mut acc, &messages, embedding);
+                for ((&m, &encoded), &actual) in messages.iter().zip(&expected).zip(&acc) {
+                    assert_eq!(codec.encode_value(m, embedding), encoded);
+                    assert_eq!(actual.into(), (q - 1 + encoded.into()) % q);
+                    let mut scalar_acc = to_value(q - 1);
+                    codec.add_encode_value_assign(&mut scalar_acc, m, embedding);
+                    assert_eq!(scalar_acc, actual);
+                }
+            }
+        }
+    }
+    check::<u16>();
+    check::<u32>();
+    check::<u64>();
+}
+
+#[test]
 fn small_moduli_and_nonzero_accumulators() {
     for (t, q) in [
         (12u64, 17u64),

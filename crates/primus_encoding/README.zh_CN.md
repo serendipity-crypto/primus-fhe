@@ -21,6 +21,10 @@ Primus FHE 的明文系数编码与解码。
 保证 `(t-1)*delta < q`，因此绝对值编码无需模乘。中心取负和累加仍需要
 密文模数运算。
 
+对于非整数比例，逐消息编码分解 `q = a*t + r`；当带舍入偏置的余数乘积
+能够放入单字时，对消息绝对值计算 `m*a + floor((m*r + floor(t/2))/t)`，
+否则保留宽位算术。
+
 仅当 `t` 整除 `q` 时，解码才使用 `round(c/delta) mod t`；舍入后的尺度
 是二次幂并不足以保证该等式。其他参数使用原生乘法高半部分或显式窄／宽乘积
 比例舍入内核。批处理算术策略均在系数循环外选择。
@@ -50,7 +54,8 @@ TFHE 从自身参数层取得逐消息编码器。GLWE TFHE 在构造时验证�
 
 RNS 编码输出系数域 `CrtPolynomial`，调用方单独执行 NTT 转换。
 `decode_coeffs_to` 会覆盖系数域输入，并要求工作区恰好包含
-`decode_scratch_len(output.len())` 个元素。该编码器是 BFV 的组成部分，
+`decode_scratch_len(output.len())` 个元素。单模数基不需要工作区，其他基需要
+一个 RNS 多项式大小的工作区。该编码器是 BFV 的组成部分，
 并非完整 BFV 方案。
 
 单模数切片方法使用 `_to` 表示独立输出，`_assign` 表示原地更新。RNS 使用
@@ -65,7 +70,10 @@ RNS 编码输出系数域 `CrtPolynomial`，调用方单独执行 NTT 转换。
   `decode.rs` 实现解码及其工作区契约。
 
 测试分别覆盖 API 一致性、独立算术 oracle 和 BFV RNS 契约。
-`benches/plaintext_codec.rs` 包含编码器基准。
+`benches/plaintext_codec.rs` 测量单模数算术和标量调度，
+`benches/bfv_rns.rs` 测量 RNS 累加编码与解码。输入覆盖中心嵌入的两个半区
+以及各自的密文模数范围。编码器和可复用缓冲区在计时外准备；破坏性解码以固定
+批量恢复输入。吞吐量按明文系数计数，RNS case 名称注明模数数量。
 
 ## Feature
 
@@ -80,4 +88,5 @@ cargo test -p primus_encoding
 cargo test -p primus_encoding --features rns
 cargo +nightly test -p primus_encoding --features rns,simd
 cargo bench -p primus_encoding --bench plaintext_codec
+cargo bench -p primus_encoding --bench bfv_rns --features rns
 ```

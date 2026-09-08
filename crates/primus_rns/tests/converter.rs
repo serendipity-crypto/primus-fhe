@@ -14,7 +14,8 @@ fn base(moduli: &[Value]) -> Base {
 #[test]
 fn fast_array_conversion_matches_scalar_conversion() {
     let input_base = base(&[17, 19, 23]);
-    let output_base = base(&[29, 31]);
+    // Adjusted source residues can exceed both destination moduli.
+    let output_base = base(&[5, 7]);
     let converter = BaseConverter::new(&input_base, &output_base);
     let input = [
         0, 1, 16, 7, // mod 17

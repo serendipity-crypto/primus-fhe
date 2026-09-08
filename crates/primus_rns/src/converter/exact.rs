@@ -78,6 +78,11 @@ impl<T: FheUint, M: FieldContext<T>> BaseConverter<T, M> {
     ///
     /// Input coefficients must be canonical residues in their corresponding
     /// input moduli.
+    ///
+    /// # Correctness
+    ///
+    /// A multi-modulus input requires the noncanonical dot-product support
+    /// described by [`Self::fast_convert`].
     pub fn exact_convert_array(
         &self,
         crt_poly_in: &[T],

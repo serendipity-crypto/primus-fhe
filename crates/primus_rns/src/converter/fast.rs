@@ -27,6 +27,11 @@ pub(crate) enum FastConversionLimb<'a, T, M> {
 
 impl<T: FheUint, M: FieldContext<T>> FastConversionLimb<'_, T, M> {
     /// Writes this destination-modulus polynomial in coefficient order.
+    ///
+    /// # Correctness
+    ///
+    /// A general limb requires the noncanonical dot-product support described
+    /// by [`BaseConverter::fast_convert`].
     #[inline]
     pub(crate) fn write_to(self, output: &mut [T]) {
         match self {
@@ -102,6 +107,17 @@ impl<T: FheUint, M: FieldContext<T>> BaseConverter<T, M> {
     /// [`fast_convert_scratch_len`](Self::fast_convert_scratch_len). The
     /// general conversion kernel overwrites only the required prefix with the
     /// adjusted input residues. A single-modulus input basis ignores scratch.
+    ///
+    /// # Correctness
+    ///
+    /// With multiple input moduli, each destination `p_j` must support dot
+    /// products of adjusted source residues `u_i < q_i` and matrix entries
+    /// below `p_j`, even when `u_i >= p_j`. This extra requirement is not
+    /// implied by [`FieldContext`] or the canonical-input contract of
+    /// [`primus_reduce::ReduceDotProduct`]. Current Barrett kernels satisfy
+    /// it for compact bases: both operands are below `2^(T::BITS - 2)`, and
+    /// each block of 16 products fits in two limbs. Other modulus
+    /// implementations must support the actual operand ranges.
     pub fn fast_convert(
         &self,
         residues_in: &Residues<impl Data<Elem = T>>,
@@ -275,6 +291,11 @@ impl<T: FheUint, M: FieldContext<T>> BaseConverter<T, M> {
     /// [`fast_convert_array_scratch_len`](Self::fast_convert_array_scratch_len).
     /// The general conversion kernel overwrites only the required prefix in
     /// coefficient-major layout. A single-modulus input basis ignores scratch.
+    ///
+    /// # Correctness
+    ///
+    /// A multi-modulus input requires the noncanonical dot-product support
+    /// described by [`Self::fast_convert`].
     pub fn fast_convert_array(
         &self,
         crt_poly_in: &[T],
@@ -313,6 +334,11 @@ impl<T: FheUint, M: FieldContext<T>> BaseConverter<T, M> {
     ///
     /// The iterator yields exactly `poly_length` items, one `(mod p_0, mod p_1)`
     /// pair per coefficient.
+    ///
+    /// # Correctness
+    ///
+    /// A multi-modulus input requires the noncanonical dot-product support
+    /// described by [`Self::fast_convert`].
     pub fn fast_convert_array_to_pair_iter<'a>(
         &'a self,
         crt_poly_in: &'a [T],

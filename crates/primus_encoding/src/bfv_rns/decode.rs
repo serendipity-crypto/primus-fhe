@@ -1,5 +1,5 @@
 use primus_data::DataMut;
-use primus_factor::FactorSliceOps;
+use primus_factor::FactorMul;
 use primus_integer::FheUint;
 use primus_poly::{CrtPolynomial, Polynomial};
 use primus_reduce::FieldContext;
@@ -12,12 +12,14 @@ where
     M: FieldContext<T>,
 {
     /// Exact scratch length for decoding `poly_length` coefficients.
+    /// A single-modulus basis requires no scratch; other bases require one RNS polynomial.
     ///
     /// # Panics
     /// Panics if the RNS shape cannot be represented by `usize`.
     #[must_use]
     pub fn decode_scratch_len(&self, poly_length: usize) -> usize {
-        self.rns_poly_len(poly_length)
+        self.converter_q_to_t_gamma
+            .fast_convert_array_scratch_len(poly_length)
     }
 
     /// Decodes canonical coefficient-domain CRT residues into coefficients modulo `t`.
@@ -29,12 +31,12 @@ where
     /// This includes encoding drift and the fast base-conversion error.
     ///
     /// `msg_mod_q` is used as mutable workspace and is overwritten. The
-    /// conversion buffer must contain one RNS polynomial.
+    /// conversion buffer must contain exactly `decode_scratch_len(msg.len())` elements.
     ///
     /// # Panics
     ///
-    /// Panics unless input and scratch each contain exactly
-    /// `output_length * moduli_count()` elements.
+    /// Panics unless input contains exactly `output_length * moduli_count()`
+    /// elements, or scratch differs from `decode_scratch_len(output_length)`.
     pub fn decode_coeffs_to<A, B>(
         &self,
         msg_mod_q: &mut CrtPolynomial<A>,
@@ -53,7 +55,7 @@ where
         );
         assert_eq!(
             fast_convert_buffer.len(),
-            rns_poly_len,
+            self.decode_scratch_len(poly_length),
             "RNS scratch length mismatch"
         );
         if poly_length == 0 {
@@ -62,10 +64,9 @@ where
 
         let t = self.t;
         let gamma = self.gamma;
-        let t_modulus = self.t_gamma[0];
-        let gamma_modulus = self.t_gamma[1];
-        let minus_inv_q_mod_t = self.minus_inv_q_mod_t_gamma[0];
-        let minus_inv_q_mod_gamma = self.minus_inv_q_mod_t_gamma[1];
+        let t_modulus = self.t_modulus;
+        let decode_factor_mod_t = self.decode_factor_mod_t_gamma[0];
+        let decode_factor_mod_gamma = self.decode_factor_mod_t_gamma[1];
         let inv_gamma_mod_t = self.inv_gamma_mod_t;
         let msg = msg.as_mut();
 
@@ -79,26 +80,22 @@ where
             &self.moduli_values,
         );
 
-        let conversion_scratch_len = self
-            .converter_q_to_t_gamma
-            .fast_convert_array_scratch_len(poly_length);
         self.converter_q_to_t_gamma
-            .fast_convert_array_to_pair_iter(
-                msg_mod_q.as_ref(),
-                poly_length,
-                &mut fast_convert_buffer[..conversion_scratch_len],
-            )
+            .fast_convert_array_to_pair_iter(msg_mod_q.as_ref(), poly_length, fast_convert_buffer)
             .zip(msg.iter_mut())
             .for_each(|((y_t, y_gamma), m)| {
-                let y_t = t_modulus.reduce_mul(y_t, minus_inv_q_mod_t);
-                let y_gamma = gamma_modulus.reduce_mul(y_gamma, minus_inv_q_mod_gamma);
+                // Distribute γ^-1 over both terms so the converted coefficient
+                // can be finalized here, without a second output pass. Shoup
+                // accepts the full-width correction; reducing it to t first
+                // is unnecessary.
+                let y_t = decode_factor_mod_t.factor_mul_modulo(y_t, t);
+                let y_gamma = decode_factor_mod_gamma.factor_mul_modulo(y_gamma, gamma);
 
                 *m = if y_gamma > (gamma >> 1u32) {
-                    t_modulus.reduce_add(y_t, t_modulus.reduce(gamma - y_gamma))
+                    t_modulus.reduce_add(y_t, inv_gamma_mod_t.factor_mul_modulo(gamma - y_gamma, t))
                 } else {
-                    t_modulus.reduce_sub(y_t, t_modulus.reduce(y_gamma))
+                    t_modulus.reduce_sub(y_t, inv_gamma_mod_t.factor_mul_modulo(y_gamma, t))
                 };
             });
-        inv_gamma_mod_t.factor_mul_slice_assign(msg, t);
     }
 }

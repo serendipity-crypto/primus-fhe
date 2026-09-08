@@ -561,7 +561,13 @@ impl<T: FheUint> DcrtGlweDecryptContext<T> {
     #[inline]
     pub fn new(size: RnsGlweSize) -> Self {
         let msg_mod_q: DcrtPolynomial<Vec<T>> = DcrtPolynomial::zero(size.rns_poly_len());
-        let fast_convert_buffer = vec![T::ZERO; size.rns_poly_len()];
+        // The codec's one-modulus converter borrows the phase directly.
+        let conversion_len = if size.moduli_count() == 1 {
+            0
+        } else {
+            size.rns_poly_len()
+        };
+        let fast_convert_buffer = vec![T::ZERO; conversion_len];
 
         Self {
             size,

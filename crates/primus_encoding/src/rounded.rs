@@ -1,12 +1,10 @@
 use super::decode::DecodeStrategy;
 use super::helpers;
-use super::helpers::{
-    checked_message, lift_centered_from_raw, mul_div_round, narrow_mul_div_round,
-};
+use super::helpers::{checked_message, lift_centered_from_raw, mul_div_round};
 use super::integer_scale::IntegerScale;
 use crate::PlaintextEmbedding;
 use primus_integer::FheUint;
-use primus_modulus::common::uint::{reduce_add_assign, reduce_neg};
+use primus_modulus::common::uint::reduce_add_assign;
 
 /// Per-message rounding: `round(lift(m) * q / t)` with ties away from zero.
 /// Decoding rounds `c * t / q` to the nearest integer, ties upward, modulo `t`.
@@ -38,10 +36,23 @@ impl<T: FheUint> RoundedCodec<T> {
         let strategy = if remainder == T::ZERO {
             RoundedEncoding::Exact(IntegerScale::new(floor, q))
         } else {
-            let ratio = match q {
-                None => RatioEncoding::Native(NativeRatio),
-                Some(q) if q.checked_mul(t).is_some() => RatioEncoding::Narrow(ExplicitRatio { q }),
-                Some(q) => RatioEncoding::Wide(ExplicitRatio { q }),
+            let biased_remainder_fits = (t - T::ONE)
+                .checked_mul(remainder)
+                .and_then(|product| product.checked_add(t >> 1u32))
+                .is_some();
+            let ratio = match (biased_remainder_fits, q) {
+                (true, None) => RatioEncoding::DecomposedNative(DecomposedRatio {
+                    floor,
+                    remainder,
+                    modulus: NativeRatio,
+                }),
+                (true, Some(q)) => RatioEncoding::DecomposedExplicit(DecomposedRatio {
+                    floor,
+                    remainder,
+                    modulus: ExplicitRatio { q },
+                }),
+                (false, None) => RatioEncoding::Native(NativeRatio),
+                (false, Some(q)) => RatioEncoding::Wide(ExplicitRatio { q }),
             };
             RoundedEncoding::Ratio(ratio)
         };
@@ -93,25 +104,66 @@ enum RoundedEncoding<T: FheUint> {
 /// Arithmetic for non-integral q/t, selected before coefficient loops.
 #[derive(Clone, Copy, Debug)]
 enum RatioEncoding<T: FheUint> {
+    DecomposedNative(DecomposedRatio<T, NativeRatio>),
+    DecomposedExplicit(DecomposedRatio<T, ExplicitRatio<T>>),
     Native(NativeRatio),
-    Narrow(ExplicitRatio<T, false>),
-    Wide(ExplicitRatio<T, true>),
+    Wide(ExplicitRatio<T>),
 }
 
 #[derive(Clone, Copy, Debug)]
 struct NativeRatio;
 
-/// WIDE selects the product width at monomorphization, outside coefficient loops.
 #[derive(Clone, Copy, Debug)]
-struct ExplicitRatio<T: FheUint, const WIDE: bool> {
+struct ExplicitRatio<T: FheUint> {
     q: T,
+}
+
+/// q = floor*t + remainder. The constructor proves (t-1)*remainder + floor(t/2)
+/// fits one word, allowing nearest rounding with a single division.
+/// For magnitude m < t, round(m*q/t) = m*floor + round(m*remainder/t) < q;
+/// both the integer product and their sum also fit one word, including native q.
+#[derive(Clone, Copy, Debug)]
+struct DecomposedRatio<T, M> {
+    floor: T,
+    remainder: T,
+    modulus: M,
+}
+
+impl<T: FheUint, M> DecomposedRatio<T, M> {
+    #[inline]
+    fn encode_magnitude(&self, magnitude: T, t: T) -> T {
+        magnitude * self.floor + (magnitude * self.remainder + (t >> 1u32)) / t
+    }
+}
+
+impl<T: FheUint> DecomposedRatio<T, NativeRatio> {
+    #[inline]
+    fn neg_nonzero(&self, value: T) -> T {
+        self.modulus.neg_nonzero(value)
+    }
+    #[inline]
+    fn add_assign(&self, acc: &mut T, value: T) {
+        self.modulus.add_assign(acc, value);
+    }
+}
+
+impl<T: FheUint> DecomposedRatio<T, ExplicitRatio<T>> {
+    #[inline]
+    fn neg_nonzero(&self, value: T) -> T {
+        self.modulus.neg_nonzero(value)
+    }
+    #[inline]
+    fn add_assign(&self, acc: &mut T, value: T) {
+        self.modulus.add_assign(acc, value);
+    }
 }
 
 macro_rules! dispatch_ratio {
     ($ratio:expr,$codec:ident => $body:expr) => {
         match $ratio {
+            RatioEncoding::DecomposedNative($codec) => $body,
+            RatioEncoding::DecomposedExplicit($codec) => $body,
             RatioEncoding::Native($codec) => $body,
-            RatioEncoding::Narrow($codec) => $body,
             RatioEncoding::Wide($codec) => $body,
         }
     };
@@ -123,7 +175,7 @@ impl NativeRatio {
         T::div_wide(t >> 1u32, magnitude, t)
     }
     #[inline]
-    fn neg<T: FheUint>(&self, value: T) -> T {
+    fn neg_nonzero<T: FheUint>(&self, value: T) -> T {
         value.wrapping_neg()
     }
     #[inline]
@@ -132,18 +184,16 @@ impl NativeRatio {
     }
 }
 
-impl<T: FheUint, const WIDE: bool> ExplicitRatio<T, WIDE> {
+impl<T: FheUint> ExplicitRatio<T> {
     #[inline]
     fn encode_magnitude(&self, magnitude: T, t: T) -> T {
-        if WIDE {
-            mul_div_round(magnitude, self.q, t)
-        } else {
-            narrow_mul_div_round(magnitude, self.q, t)
-        }
+        mul_div_round(magnitude, self.q, t)
     }
     #[inline]
-    fn neg(&self, value: T) -> T {
-        reduce_neg(self.q, value)
+    fn neg_nonzero(&self, value: T) -> T {
+        // A negative lift has magnitude >= 1; q > t makes its encoding nonzero.
+        debug_assert!(value != T::ZERO);
+        self.q - value
     }
     #[inline]
     fn add_assign(&self, acc: &mut T, value: T) {
@@ -176,7 +226,7 @@ impl<T: FheUint> RoundedCodec<T> {
             RoundedEncoding::Exact(scale) => {
                 let encoded = scale.encode_magnitude(magnitude);
                 if is_negative {
-                    scale.neg(encoded)
+                    scale.neg_nonzero(encoded)
                 } else {
                     encoded
                 }
@@ -184,7 +234,7 @@ impl<T: FheUint> RoundedCodec<T> {
             RoundedEncoding::Ratio(ratio) => dispatch_ratio!(ratio, codec => {
                 let encoded = codec.encode_magnitude(magnitude, self.t);
                 if is_negative {
-                    codec.neg(encoded)
+                    codec.neg_nonzero(encoded)
                 } else {
                     encoded
                 }
@@ -232,7 +282,7 @@ impl<T: FheUint> RoundedCodec<T> {
                                     lift_centered_from_raw(message, t, self.centered_half);
                                 let encoded = codec.encode_magnitude(magnitude, t);
                                 *output = if is_negative {
-                                    codec.neg(encoded)
+                                    codec.neg_nonzero(encoded)
                                 } else {
                                     encoded
                                 };
@@ -281,7 +331,7 @@ impl<T: FheUint> RoundedCodec<T> {
                                     lift_centered_from_raw(*value, t, self.centered_half);
                                 let encoded = codec.encode_magnitude(magnitude, t);
                                 *value = if is_negative {
-                                    codec.neg(encoded)
+                                    codec.neg_nonzero(encoded)
                                 } else {
                                     encoded
                                 };
@@ -320,7 +370,7 @@ impl<T: FheUint> RoundedCodec<T> {
             RoundedEncoding::Exact(scale) => {
                 let encoded = scale.encode_magnitude(magnitude);
                 let encoded = if is_negative {
-                    scale.neg(encoded)
+                    scale.neg_nonzero(encoded)
                 } else {
                     encoded
                 };
@@ -329,7 +379,7 @@ impl<T: FheUint> RoundedCodec<T> {
             RoundedEncoding::Ratio(ratio) => dispatch_ratio!(ratio, codec => {
                 let encoded = codec.encode_magnitude(magnitude, self.t);
                 let encoded = if is_negative {
-                    codec.neg(encoded)
+                    codec.neg_nonzero(encoded)
                 } else {
                     encoded
                 };
@@ -391,7 +441,7 @@ impl<T: FheUint> RoundedCodec<T> {
                                     lift_centered_from_raw(message, t, self.centered_half);
                                 let encoded = codec.encode_magnitude(magnitude, t);
                                 let encoded = if is_negative {
-                                    codec.neg(encoded)
+                                    codec.neg_nonzero(encoded)
                                 } else {
                                     encoded
                                 };

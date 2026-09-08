@@ -40,16 +40,32 @@ fn multiword_modulus_roundtrip() {
 fn floor_scaling_and_noisy_decode_match_integer_oracle() {
     use primus_encoding::PlaintextEmbedding::{Centered, Unsigned};
     for (moduli, t, gamma) in [
-        ([17u64, 19], 3, 65537),
-        ([17, 19], 2, 65537),
-        ([97, 193], 7, 65537),
+        (&[97u64][..], 3, 65537),
+        (&[17u64, 19][..], 3, 65537),
+        (&[17, 19][..], 2, 65537),
+        (&[97, 193][..], 7, 65537),
     ] {
-        let q = u128::from(moduli[0]) * u128::from(moduli[1]);
+        let q: u128 = moduli.iter().map(|&qi| u128::from(qi)).product();
         let delta = q / u128::from(t);
-        let base = RNSBase::new(&moduli.map(BarrettModulus::new)).unwrap();
+        let base = RNSBase::new(
+            &moduli
+                .iter()
+                .copied()
+                .map(BarrettModulus::new)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         let codec = BfvRnsCodec::new(BarrettModulus::new(t), base, BarrettModulus::new(gamma));
         let input = Polynomial::new((0..t).collect::<Vec<_>>());
         let n = t as usize;
+        assert_eq!(
+            codec.decode_scratch_len(n),
+            if moduli.len() == 1 {
+                0
+            } else {
+                n * moduli.len()
+            }
+        );
         for embedding in [Unsigned, Centered] {
             let expected: Vec<u64> = moduli
                 .iter()
@@ -64,7 +80,7 @@ fn floor_scaling_and_noisy_decode_match_integer_oracle() {
                     })
                 })
                 .collect();
-            let mut encoded = CrtPolynomial::<Vec<u64>>::zero(n * 2);
+            let mut encoded = CrtPolynomial::<Vec<u64>>::zero(n * moduli.len());
             codec.encode_coeffs_to(&input, &mut encoded, embedding);
             assert_eq!(encoded.as_ref(), expected);
             let mut acc = CrtPolynomial::new(

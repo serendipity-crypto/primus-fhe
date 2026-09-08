@@ -84,7 +84,7 @@ impl<T: FheUint> ScaledCodec<T> {
         };
         let value = self.scale.encode_magnitude(m);
         if negative {
-            self.scale.neg(value)
+            self.scale.neg_nonzero(value)
         } else {
             value
         }

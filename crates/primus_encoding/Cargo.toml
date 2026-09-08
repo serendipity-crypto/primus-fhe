@@ -29,3 +29,8 @@ simd = [
 [[bench]]
 name = "plaintext_codec"
 harness = false
+
+[[bench]]
+name = "bfv_rns"
+harness = false
+required-features = ["rns"]
