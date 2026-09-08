@@ -8,12 +8,12 @@ Primus FHE 的明文系数编码与解码。
 
 | 编码器 | 编码规则 | 当前用途 |
 | --- | --- | --- |
-| `RoundedCodec<T>` | `round(lift(m)*q/t)` | LWE 和 TFHE 查找表 |
+| `RoundedCodec<T>` | `round(lift(m)*q/t) mod q` | LWE 和 TFHE 查找表 |
 | `ScaledCodec<T>` | `lift(m)*round(q/t) mod q` | 单模数 GLWE/NTRU |
 | `BfvRnsCodec<T,M>` | `lift(m)*floor(Q/t) mod Q` | RNS 系数缩放（`rns` feature） |
 
 公开类型直接从 crate 根部导出，实现模块保持私有。单模数编码器用 `None` 表示原生模数
-`2^T::BITS`。两个公开编码器互相独立，复用私有的整数缩放与解码内核。
+`2^T::BITS`。两个单模数编码器互相独立，复用私有的整数缩放与解码内核。
 `t` 整除 `q` 时，两者都使用精确整数尺度 `q/t`；否则 `RoundedCodec`
 对每个缩放消息舍入，`ScaledCodec` 使用统一的舍入整数尺度。
 
@@ -41,6 +41,7 @@ TFHE 从自身参数层取得逐消息编码器。GLWE TFHE 在构造时验证�
 `[-floor(t/2),ceil(t/2))`，包括 `t=2` 时的 `1 -> -1`。逐消息编码先对绝对值
 舍入（中点向上），再应用符号；解码对规范相位乘以 `t/q` 后舍入（中点向上），
 结果模 `t`。累加器与解码输入必须是对应密文模数或有序 RNS 基上的规范剩余。
+这些密文输入范围由调用方保证，编码器不会验证。
 
 `RoundedCodec` 要求 `t >= 2` 且 `q > t`。`ScaledCodec` 还检查
 `abs(t*round(q/t)-q)*(t-1) < q/2`，这是两种嵌入无噪声恢复的充分条件。
@@ -51,6 +52,9 @@ TFHE 从自身参数层取得逐消息编码器。GLWE TFHE 在构造时验证�
 互素条件外，构造器检查保守的恢复充分条件：`Q > 4*(Q % t)*(t-1)` 和
 `gamma > 4*k`，其中 `k` 为模数数量。对于相位 `delta*m+e`，解码的充分条件为
 `abs(t*e-(Q % t)*m)/Q + k/gamma < 1/2`。
+当密文基包含多个模数时，目标模数 `t` 和 `gamma` 的实现还必须满足
+`BaseConverter::fast_convert` 文档中的额外点积输入要求；`FieldContext` 本身
+不保证这一点。
 
 RNS 编码输出系数域 `CrtPolynomial`，调用方单独执行 NTT 转换。
 `decode_coeffs_to` 会覆盖系数域输入，并要求工作区恰好包含

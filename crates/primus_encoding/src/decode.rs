@@ -33,6 +33,13 @@ pub(super) enum DecodeStrategy<T: FheUint> {
 
 impl<T: FheUint> DecodeStrategy<T> {
     /// Uses a validated modulus pair and its exact quotient/remainder.
+    ///
+    /// # Correctness
+    ///
+    /// Requires `q > t >= 2`, `delta = floor(q/t)`, and `remainder = q % t`,
+    /// with `None` denoting `q = 2^T::BITS`. Callers must reuse this `t` when
+    /// applying the strategy. Exact divisibility then gives `delta >= 2`, so
+    /// a shift strategy always has `1 <= shift < T::BITS`.
     pub(super) fn from_ratio(t: T, q: Option<T>, delta: T, remainder: T) -> Self {
         if remainder == T::ZERO {
             if delta.is_power_of_two() {
@@ -67,8 +74,19 @@ impl<T: FheUint> DecodeStrategy<T> {
         self.apply(input.iter().copied().zip(output), t);
     }
 
-    // All phases are canonical. Raw rounding lies in [0,t]; select reduction
-    // outside the loop and avoid an overflowing c + delta/2 intermediate.
+    /// Applies nearest rounding and canonical reduction, with dispatch outside the loop.
+    ///
+    /// # Correctness
+    ///
+    /// Every phase must be in `[0,q)` and `t` must match construction. Raw
+    /// rounding then lies in `[0,t]`, so one subtraction (or a power-of-two
+    /// mask) suffices. Quotient/remainder arithmetic avoids an overflowing
+    /// `c + delta/2` intermediate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if conversion of a decoded residue to `M` fails; earlier output
+    /// elements may already have been written.
     #[inline]
     fn apply<'a, M: TryFrom<T> + 'a, I: Iterator<Item = (T, &'a mut M)>>(&self, input: I, t: T) {
         match *self {

@@ -28,11 +28,15 @@ where
     /// Encodes coefficients as `lift(input) * floor(Q/t)` in the ordered CRT basis.
     ///
     /// Centered embedding uses `[-floor(t/2), ceil(t/2))`, including `1 -> -1`
-    /// for `t = 2`. Output is in the coefficient domain, ready for a separate NTT.
+    /// for `t = 2`. Output is overwritten with canonical coefficient-domain
+    /// residues, ready for a separate NTT. Each consecutive chunk of `input.len()`
+    /// elements corresponds to one modulus in [`Self::base_q`] order.
+    /// Message and length validation completes before any writes.
     ///
     /// # Panics
+    ///
     /// Panics for messages outside `[0,t)` or an output length other than
-    /// `input.len() * moduli_count()`.
+    /// `input.len() * moduli_count()`, or if that product overflows `usize`.
     pub fn encode_coeffs_to<A, B>(
         &self,
         input: &Polynomial<A>,
@@ -63,6 +67,7 @@ where
                             factor.factor_mul_modulo(m, q)
                         } else {
                             let value = factor.factor_mul_modulo(self.t - m, q);
+                            // A nonzero scaled lift can still be zero in an RNS limb.
                             if value == T::ZERO { value } else { q - value }
                         };
                     }
@@ -71,14 +76,22 @@ where
         }
     }
 
-    /// Adds scaled plaintext coefficients to a canonical CRT accumulator.
+    /// Adds scaled plaintext coefficients to a coefficient-domain CRT accumulator.
     ///
     /// Uses the same embedding as [`Self::encode_coeffs_to`]. The accumulator
-    /// is not cleared; its residues must be canonical under their respective moduli.
+    /// is not cleared; message and length validation completes before any writes.
+    ///
+    /// # Correctness
+    ///
+    /// `acc` must use modulus-major coefficient layout in [`Self::base_q`] order.
+    /// Each chunk of `input.len()` elements must contain canonical residues
+    /// modulo its corresponding `q_i` and remains canonical after addition.
+    /// Residue ranges and the basis/domain of the stored data are not checked.
     ///
     /// # Panics
+    ///
     /// Panics for messages outside `[0,t)` or an accumulator length other than
-    /// `input.len() * moduli_count()`.
+    /// `input.len() * moduli_count()`, or if that product overflows `usize`.
     pub fn add_encode_coeffs_assign<A, B>(
         &self,
         input: &Polynomial<A>,

@@ -6,11 +6,12 @@ use super::{
 use crate::PlaintextEmbedding;
 use primus_integer::FheUint;
 
-/// Fixed rounded scaling: `lift(m) * round(q/t) mod q`.
+/// Fixed rounded scaling: `lift(m) * delta mod q`, returned in `[0,q)`, where
+/// `delta = round(q/t)` with ties upward.
 ///
 /// This preserves the coefficient scaling used by single-modulus GLWE/NTRU.
 /// It is distinct from BFV's `floor(Q/t)` scaling and per-message rounding.
-/// Decoding rounds `c*t/q` modulo `t`. For integer lift `m` and noise `e`,
+/// Decoding rounds `c*t/q` with ties upward, modulo `t`. For integer lift `m` and noise `e`,
 /// recovery is guaranteed when `abs((t*delta-q)*m + t*e) < q/2`.
 /// Accumulators and decoding inputs must be canonical ciphertext residues.
 #[derive(Clone, Copy, Debug)]
@@ -23,10 +24,13 @@ pub struct ScaledCodec<T: FheUint> {
 impl<T: FheUint> ScaledCodec<T> {
     /// Constructs a fixed-scale codec; `None` denotes `q = 2^T::BITS`.
     ///
+    /// The scale-recovery bound below is a conservative sufficient condition
+    /// for noiseless recovery with either lift.
+    ///
     /// # Panics
+    ///
     /// Panics unless `t >= 2`, `q > t`, and
-    /// `abs(t*round(q/t)-q)*(t-1) < q/2`. The last condition is a
-    /// conservative sufficient bound for noiseless recovery with either lift.
+    /// `abs(t*round(q/t)-q)*(t-1) < q/2`.
     #[must_use]
     pub fn new(t: T, q: Option<T>) -> Self {
         let (floor, remainder) = modulus_div_rem(t, q);
@@ -62,9 +66,10 @@ impl<T: FheUint> ScaledCodec<T> {
         self.t
     }
 
-    /// Encodes a residue in `[0,t)` with the selected lift.
+    /// Encodes a residue in `[0,t)` into a canonical residue in `[0,q)` with the selected lift.
     ///
     /// # Panics
+    ///
     /// Panics if the message cannot be represented by `T` or is outside `[0,t)`.
     #[must_use]
     #[inline]
@@ -73,7 +78,9 @@ impl<T: FheUint> ScaledCodec<T> {
         self.encode_raw(message, embedding)
     }
 
-    // Requires a validated plaintext residue.
+    /// Encodes a validated plaintext residue `message < t`.
+    /// The positive scale and `(t-1)*delta < q` ensure that negative lifts have
+    /// nonzero encodings, permitting explicit negation as `q - value`.
     #[inline]
     fn encode_raw(&self, message: T, embedding: PlaintextEmbedding) -> T {
         let (m, negative) = match embedding {
@@ -90,9 +97,11 @@ impl<T: FheUint> ScaledCodec<T> {
         }
     }
 
-    /// Encodes messages into an equally sized output slice.
+    /// Encodes messages into an equally sized output slice of canonical residues in `[0,q)`.
+    /// The previous output is overwritten; validation completes before any writes.
     ///
     /// # Panics
+    ///
     /// Panics on a length mismatch or messages outside `[0,t)`.
     #[inline]
     pub fn encode_slice_to(&self, messages: &[T], output: &mut [T], embedding: PlaintextEmbedding) {
@@ -104,7 +113,12 @@ impl<T: FheUint> ScaledCodec<T> {
         );
     }
 
-    /// Encodes messages in place. Panics on messages outside `[0,t)`.
+    /// Replaces plaintext residues with canonical ciphertext residues in `[0,q)`.
+    /// Validation completes before any writes.
+    ///
+    /// # Panics
+    ///
+    /// Panics on messages outside `[0,t)`.
     #[inline]
     pub fn encode_slice_assign(&self, values: &mut [T], embedding: PlaintextEmbedding) {
         self.validate(values, values.len());
@@ -118,9 +132,16 @@ impl<T: FheUint> ScaledCodec<T> {
         );
     }
 
-    /// Adds encoded messages into canonical ciphertext residues.
+    /// Adds encoded messages modulo `q` to the accumulator without clearing it.
+    /// Validation of messages and lengths completes before any writes.
+    ///
+    /// # Correctness
+    ///
+    /// Every accumulator must be in `[0,q)` and remains canonical after addition.
+    /// Accumulator ranges are not checked.
     ///
     /// # Panics
+    ///
     /// Panics on a length mismatch or messages outside `[0,t)`.
     #[inline]
     pub fn add_encode_slice_assign(
@@ -146,20 +167,41 @@ impl<T: FheUint> ScaledCodec<T> {
         );
     }
 
-    /// Decodes a canonical ciphertext residue. Panics if `M` cannot hold the result.
+    /// Decodes a ciphertext residue into a canonical plaintext residue in `[0,t)`.
+    ///
+    /// # Correctness
+    ///
+    /// `value` must be in `[0,q)`. This range is not checked.
+    ///
+    /// # Panics
+    ///
+    /// Panics if conversion of the decoded residue to `M` fails.
     #[must_use]
     #[inline]
     pub fn decode_value<M: TryFrom<T>>(&self, value: T) -> M {
         self.decoder.value(value, self.t)
     }
 
-    /// Decodes canonical ciphertext residues in place.
+    /// Replaces ciphertext residues with canonical plaintext residues in `[0,t)`.
+    ///
+    /// # Correctness
+    ///
+    /// Every input must be in `[0,q)`. This range is not checked.
     pub fn decode_slice_assign(&self, values: &mut [T]) {
         self.decoder.assign(values, self.t);
     }
 
-    /// Decodes canonical ciphertext residues into an equally sized output slice.
-    /// Panics on a length mismatch or if `M` cannot hold a result.
+    /// Decodes into an equally sized output slice of canonical residues in `[0,t)`.
+    ///
+    /// # Correctness
+    ///
+    /// Every input must be in `[0,q)`. This range is not checked.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slices differ in length or conversion of a decoded residue
+    /// to `M` fails. Length is checked before writing; conversion failure may
+    /// leave earlier output elements modified.
     pub fn decode_slice_to<M: TryFrom<T>>(&self, input: &[T], output: &mut [M]) {
         self.decoder.to(input, output, self.t);
     }

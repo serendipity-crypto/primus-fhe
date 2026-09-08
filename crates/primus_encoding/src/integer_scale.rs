@@ -3,9 +3,10 @@ use crate::PlaintextEmbedding;
 use primus_integer::FheUint;
 use primus_modulus::common::uint::reduce_add;
 
-/// Integer scaling shared by fixed-scale encoding and exact q/t encoding.
-/// Constructors of the owning codec guarantee (t-1)*delta < q, so magnitude
-/// products fit one word and are canonical without modular multiplication.
+/// Integer scaling shared by fixed-scale encoding and exact `q/t` encoding.
+/// The owning codec guarantees `delta > 0` and `(t-1)*delta < q` for `t >= 2`,
+/// so magnitude products fit one word and are canonical without modular
+/// multiplication. `None` denotes the native modulus `q = 2^T::BITS`.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct IntegerScale<T: FheUint> {
     q: Option<T>,
@@ -20,6 +21,12 @@ enum ScaleOp<T> {
 }
 
 impl<T: FheUint> IntegerScale<T> {
+    /// Selects a shift or multiplication for the integer scale.
+    ///
+    /// # Correctness
+    ///
+    /// The owning codec must establish the scale/modulus invariant documented
+    /// on [`IntegerScale`]; this constructor does not validate it.
     pub(super) fn new(delta: T, q: Option<T>) -> Self {
         let op = if delta.is_power_of_two() {
             ScaleOp::Shift {
@@ -28,9 +35,10 @@ impl<T: FheUint> IntegerScale<T> {
         } else {
             ScaleOp::Multiply { delta }
         };
-        Self { op, q }
+        Self { q, op }
     }
 
+    /// Scales a magnitude whose mathematical product `m*delta` is below `q`.
     #[inline]
     pub(super) fn encode_magnitude(&self, m: T) -> T {
         match self.op {
@@ -38,7 +46,12 @@ impl<T: FheUint> IntegerScale<T> {
             ScaleOp::Multiply { delta } => m * delta,
         }
     }
-    /// Negative lifts have positive magnitude and hence a nonzero scaled value.
+    /// Negates a nonzero canonical encoding modulo `q`.
+    ///
+    /// # Correctness
+    ///
+    /// Requires `0 < value < q`. Negative lifts have positive magnitude and
+    /// the scale invariant ensures their encodings satisfy this condition.
     #[inline]
     pub(super) fn neg_nonzero(&self, value: T) -> T {
         debug_assert!(value != T::ZERO);
@@ -47,6 +60,7 @@ impl<T: FheUint> IntegerScale<T> {
             Some(q) => q - value,
         }
     }
+    /// Adds a canonical encoding to a canonical accumulator modulo `q`.
     #[inline]
     pub(super) fn add_assign(&self, acc: &mut T, value: T) {
         *acc = match self.q {
@@ -57,6 +71,12 @@ impl<T: FheUint> IntegerScale<T> {
 
     /// Applies scaling to validated messages, optionally adding to canonical output.
     /// The iterator also permits in-place encoding without allocating a copy.
+    ///
+    /// # Correctness
+    ///
+    /// `t` must satisfy the scale invariant established by the owning codec.
+    /// Each message must be in `[0,t)`; when `ADD` is true, each output must
+    /// already be in `[0,q)`. These preconditions are not checked here.
     // Keep dispatch inline so callers can specialize the scale and modulus.
     #[inline(always)]
     pub(super) fn apply<'a, const ADD: bool, I>(
@@ -112,7 +132,9 @@ impl<T: FheUint> IntegerScale<T> {
 }
 
 /// Modulus, scale and embedding dispatch is performed before entering the loop.
-/// The negation callback is only applied to encodings of positive magnitudes.
+/// Inherits the validated message and accumulator ranges from `IntegerScale::apply`.
+/// The positive scale makes encodings of negative lifts nonzero, so `neg` may
+/// use `q - value` directly for explicit moduli.
 #[inline]
 fn apply_kernel<'a, T: FheUint + 'a, const ADD: bool, I, E, N, A>(
     input: I,

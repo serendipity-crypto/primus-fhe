@@ -1,5 +1,5 @@
 //! Coefficient throughput and scalar-call cost with reusable codecs and buffers.
-//! Inputs span the complete plaintext/ciphertext domain, including the centered
+//! Inputs sample across the plaintext/ciphertext ranges, including the centered
 //! boundary. In-place decoding restores its input outside timing in fixed batches.
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

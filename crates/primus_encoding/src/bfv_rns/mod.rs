@@ -10,8 +10,10 @@ use primus_rns::{BaseConverter, RNSBase, ResidueFactors};
 
 /// BFV-style RNS coefficient codec.
 ///
-/// Encodes `m ∈ Z_t` as RNS residues of `m · Δ mod Q` where `Δ = floor(Q/t)`,
-/// and decodes via the HPS / Bajard et al. fast base extension to `{t, γ}`.
+/// Encodes `m ∈ Z_t` as canonical RNS residues of `lift(m) * delta mod Q`,
+/// where `delta = floor(Q/t)`. Decoding uses fast base conversion to `{t, gamma}`
+/// and an auxiliary-modulus correction to recover canonical residues modulo `t`.
+/// CRT buffers use coefficient-domain, modulus-major layout in [`Self::base_q`] order.
 #[derive(Clone)]
 pub struct BfvRnsCodec<T, M>
 where
@@ -27,7 +29,7 @@ where
     delta: BigUint<Vec<T>>,
     delta_factor_mod_q: ResidueFactors<Vec<ShoupFactor<T>>>,
 
-    // For decoding: HPS γ-trick, produces m mod t
+    // For decoding: auxiliary-modulus correction, producing m mod t.
     gamma: T,
     t_modulus: M,
     t_gamma_factor_mod_q: ResidueFactors<Vec<ShoupFactor<T>>>, // [(t·γ) mod q_i]
@@ -48,11 +50,13 @@ where
     /// Establishes conservative noiseless-recovery bounds:
     /// `Q > 4*(Q % t)*(t-1)` and `gamma > 4*k` for `k` ciphertext moduli.
     /// These are sufficient bounds, not the full set of usable BFV parameters.
+    /// The supplied [`RNSBase`] already guarantees a nonempty, pairwise-coprime basis.
     ///
     /// # Panics
+    ///
     /// Panics unless `t >= 2`, `t < gamma <= T::MAX/2`, each `t < q_i <= T::MAX/2`,
-    /// and `t`, `gamma`, and each ciphertext modulus are pairwise coprime
-    /// as required by the conversions. Also panics if the recovery bounds fail.
+    /// `gcd(t,gamma) = 1`, and each `q_i` is coprime with both `t` and `gamma`.
+    /// Also panics if either recovery bound above fails.
     #[must_use]
     pub fn new(t_modulus: M, base_q: RNSBase<T, M>, gamma_modulus: M) -> Self {
         let t = t_modulus.value();
@@ -174,7 +178,7 @@ where
         self.t
     }
 
-    /// Returns the ordered ciphertext RNS basis Q.
+    /// Returns the ordered ciphertext RNS basis whose product is `Q`.
     #[must_use]
     pub fn base_q(&self) -> &RNSBase<T, M> {
         &self.base_q
@@ -192,19 +196,23 @@ where
         &self.moduli_values
     }
 
-    /// Returns the Shoup factors for `floor(Q / t)` in every Q limb.
+    /// Returns the Shoup factors for `floor(Q/t) mod q_i` in [`Self::base_q`] order.
     #[must_use]
     pub fn delta_factor_mod_q(&self) -> ResidueFactors<&[ShoupFactor<T>]> {
         self.delta_factor_mod_q.view()
     }
 
-    /// Returns `floor(Q / t)` as a multi-limb integer.
+    /// Returns `floor(Q/t)` as a borrowed integer with little-endian limbs.
     #[must_use]
     pub fn delta(&self) -> BigUint<&[T]> {
         self.delta.view()
     }
 
     /// Shared RNS shape for coefficient buffers and decoding workspace.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `poly_length * moduli_count()` overflows `usize`.
     fn rns_poly_len(&self, poly_length: usize) -> usize {
         self.moduli_count()
             .checked_mul(poly_length)

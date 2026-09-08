@@ -12,31 +12,46 @@ where
     M: FieldContext<T>,
 {
     /// Exact scratch length for decoding `poly_length` coefficients.
-    /// A single-modulus basis requires no scratch; other bases require one RNS polynomial.
+    /// Returns zero for a single-modulus basis, otherwise
+    /// `poly_length * moduli_count()` elements.
     ///
     /// # Panics
-    /// Panics if the RNS shape cannot be represented by `usize`.
+    ///
+    /// Panics if the required scratch length overflows `usize`.
     #[must_use]
     pub fn decode_scratch_len(&self, poly_length: usize) -> usize {
         self.converter_q_to_t_gamma
             .fast_convert_array_scratch_len(poly_length)
     }
 
-    /// Decodes canonical coefficient-domain CRT residues into coefficients modulo `t`.
+    /// Decodes coefficient-domain CRT residues into canonical coefficients in `[0,t)`.
     ///
-    /// The caller must inverse-transform NTT data before creating the CRT view.
-    /// For phase `c = delta*m + e` (with the chosen integer lift of `m`), a
-    /// sufficient recovery condition is
-    /// `abs(t*e - (Q % t)*m)/Q + k/gamma < 1/2`, where `k = moduli_count()`.
+    /// `msg_mod_q` is overwritten as workspace; `msg` receives the decoded
+    /// coefficients. `fast_convert_buffer` must contain exactly
+    /// `decode_scratch_len(msg.len())` elements and need not be zeroed.
+    ///
+    /// # Correctness
+    ///
+    /// `msg_mod_q` must use modulus-major coefficient layout in [`Self::base_q`]
+    /// order: each chunk of `msg.len()` elements contains canonical residues
+    /// modulo its corresponding `q_i`. Residue ranges and basis/domain are not
+    /// checked; NTT data must be inverse-transformed before this call.
+    ///
+    /// With multiple ciphertext moduli, the destination moduli `t` and `gamma`
+    /// must support the additional dot-product input ranges documented by
+    /// [`primus_rns::BaseConverter::fast_convert`]. [`FieldContext`] alone does
+    /// not guarantee this. A single-modulus basis uses direct reduction.
+    ///
+    /// For phase `c = delta*m + e (mod Q)`, where `delta = floor(Q/t)` and `m`
+    /// is the chosen integer lift, a sufficient recovery condition is
+    /// `abs(t*e - (Q % t)*m)/Q + k/gamma < 1/2`, with `k = moduli_count()`.
     /// This includes encoding drift and the fast base-conversion error.
-    ///
-    /// `msg_mod_q` is used as mutable workspace and is overwritten. The
-    /// conversion buffer must contain exactly `decode_scratch_len(msg.len())` elements.
     ///
     /// # Panics
     ///
-    /// Panics unless input contains exactly `output_length * moduli_count()`
-    /// elements, or scratch differs from `decode_scratch_len(output_length)`.
+    /// Panics if `msg_mod_q.len()` differs from `msg.len() * moduli_count()`,
+    /// that product overflows `usize`, or `fast_convert_buffer.len()` differs
+    /// from `decode_scratch_len(msg.len())`. Lengths are checked before any writes.
     pub fn decode_coeffs_to<A, B>(
         &self,
         msg_mod_q: &mut CrtPolynomial<A>,

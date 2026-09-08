@@ -1,6 +1,12 @@
 use primus_integer::FheUint;
 
-/// Computes `round(lhs * rhs / divisor)`.
+/// Computes `round(lhs * rhs / divisor)` with ties upward using two limbs.
+///
+/// # Correctness
+///
+/// `divisor` must be nonzero and the rounded quotient must fit in `T`.
+/// Equivalently, the high limb after adding `floor(divisor/2)` must be less
+/// than `divisor`, as required by `div_wide`.
 #[inline]
 pub(super) fn mul_div_round<T>(lhs: T, rhs: T, divisor: T) -> T
 where
@@ -10,7 +16,13 @@ where
     T::div_wide(lo, hi, divisor)
 }
 
-/// Computes `round(lhs * rhs / divisor)` when the product fits in one limb.
+/// Computes `round(lhs * rhs / divisor)` with ties upward using one limb.
+/// Quotient/remainder rounding avoids adding a potentially overflowing bias
+/// to the product.
+///
+/// # Correctness
+///
+/// `divisor` must be nonzero and `lhs * rhs` must fit in `T`.
 #[inline]
 pub(super) fn narrow_mul_div_round<T>(lhs: T, rhs: T, divisor: T) -> T
 where
@@ -51,6 +63,12 @@ where
         .unwrap()
 }
 
+/// Returns the magnitude and negative flag of the centered lift.
+///
+/// # Correctness
+///
+/// Requires `t >= 2`, `message < t`, and `half = ceil(t/2)`. A negative lift
+/// then has strictly positive magnitude, including `1 -> -1` for `t = 2`.
 #[inline]
 pub(super) fn lift_centered_from_raw<T: FheUint>(message: T, t: T, half: T) -> (T, bool) {
     if message < half {
@@ -67,7 +85,12 @@ pub(super) fn checked_message<M: TryInto<T>, T: FheUint>(message: M, t: T) -> T 
     message
 }
 
-/// Validates the modulus pair and divides the mathematical ciphertext modulus by t.
+/// Returns `(floor(q/t), q % t)` after validating the modulus pair.
+/// `None` represents the mathematical modulus `q = 2^T::BITS`.
+///
+/// # Panics
+///
+/// Panics if `t < 2` or an explicit `q <= t`.
 pub(super) fn modulus_div_rem<T: FheUint>(t: T, q: Option<T>) -> (T, T) {
     assert!(t >= T::TWO, "plaintext modulus must be at least 2");
     assert!(
@@ -78,6 +101,8 @@ pub(super) fn modulus_div_rem<T: FheUint>(t: T, q: Option<T>) -> (T, T) {
         Some(q) => q.div_rem(t),
         None => {
             let quotient = T::div_wide(T::ZERO, T::ONE, t);
+            // q - quotient*t is in [0,t); wrapping recovers it without
+            // representing the native modulus q in one limb.
             (quotient, T::ZERO.wrapping_sub(quotient.wrapping_mul(t)))
         }
     }

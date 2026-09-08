@@ -8,13 +8,13 @@ Plaintext coefficient encoding and decoding for Primus FHE.
 
 | Codec | Encoding | Current use |
 | --- | --- | --- |
-| `RoundedCodec<T>` | `round(lift(m)*q/t)` | LWE and TFHE lookup tables |
+| `RoundedCodec<T>` | `round(lift(m)*q/t) mod q` | LWE and TFHE lookup tables |
 | `ScaledCodec<T>` | `lift(m)*round(q/t) mod q` | Single-modulus GLWE/NTRU |
 | `BfvRnsCodec<T,M>` | `lift(m)*floor(Q/t) mod Q` | RNS coefficient scaling (`rns` feature) |
 
 Public types are available directly at the crate root; implementation modules
 are private. The single-modulus codecs accept
-`None` for the native modulus `2^T::BITS`. The two public codecs are independent;
+`None` for the native modulus `2^T::BITS`. The two single-modulus codecs are independent;
 they share private integer-scaling and decoding kernels. When `t` divides `q`,
 both encode with the exact integer scale `q/t`. Otherwise `RoundedCodec` rounds
 each scaled message, while `ScaledCodec` uses one rounded integer scale.
@@ -49,6 +49,7 @@ to `[0,t)`; centered embedding lifts them to `[-floor(t/2),ceil(t/2))`, includin
 then applies its sign; decoding rounds the canonical phase times `t/q`, with
 ties upward, modulo `t`. Accumulators and decoding inputs must be canonical
 ciphertext residues in the codec's modulus or ordered RNS basis.
+These ciphertext input ranges are caller preconditions, not validated by the codecs.
 
 `RoundedCodec` requires `t >= 2` and `q > t`. `ScaledCodec` additionally checks
 `abs(t*round(q/t)-q)*(t-1) < q/2`, a sufficient condition for noiseless recovery
@@ -62,6 +63,9 @@ constructor checks conservative sufficient recovery bounds
 as well as the modulus and coprimality conditions documented in rustdoc.
 For phase `delta*m+e`, a sufficient decode bound is
 `abs(t*e-(Q % t)*m)/Q + k/gamma < 1/2`.
+For multiple ciphertext moduli, the destination modulus implementations for `t`
+and `gamma` must also satisfy the extra dot-product input requirements documented
+by `BaseConverter::fast_convert`; `FieldContext` alone does not imply them.
 
 RNS encoding produces coefficient-domain `CrtPolynomial` data; callers perform
 NTT conversions separately. `decode_coeffs_to` overwrites its coefficient-domain
