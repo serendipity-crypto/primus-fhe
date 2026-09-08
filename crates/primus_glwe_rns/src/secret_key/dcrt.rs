@@ -96,9 +96,10 @@ impl<T: FheUint> DcrtGlweSecretKey<T> {
 
     /// Encrypts an already-decomposed CRT plaintext polynomial.
     ///
-    /// The message should be the result of [`crate::RnsCoeffCodec::unsigned_encode_coeffs`]
-    /// or a hand-constructed [`CrtPolynomial`] whose coefficients are in `[0, q_i)`.
-    /// Delta scaling is applied using Shoup factors from the codec.
+    /// The message contains unscaled plaintext lifts reduced into each `[0, q_i)`,
+    /// in coefficient-domain CRT layout. This method applies `floor(Q/t)` scaling;
+    /// passing the already-scaled output of [`crate::BfvRnsCodec::encode_coeffs_to`]
+    /// would apply the scale twice.
     pub fn encrypt_inplace<R, M, Table, A, B>(
         &self,
         msg: &CrtPolynomial<A>,
@@ -173,9 +174,11 @@ impl<T: FheUint> DcrtGlweSecretKey<T> {
             rng,
         );
 
-        params
-            .codec()
-            .add_unsigned_encode_coeffs_assign(msg, &mut CrtPolynomial(&mut *b.0));
+        params.codec().add_encode_coeffs_assign(
+            msg,
+            &mut CrtPolynomial(&mut *b.0),
+            primus_encoding::PlaintextEmbedding::Unsigned,
+        );
 
         table.transform_slice(b.0);
 
@@ -215,9 +218,11 @@ impl<T: FheUint> DcrtGlweSecretKey<T> {
             rng,
         );
 
-        params
-            .codec()
-            .add_centered_encode_coeffs_assign(msg, &mut CrtPolynomial(&mut *b.0));
+        params.codec().add_encode_coeffs_assign(
+            msg,
+            &mut CrtPolynomial(&mut *b.0),
+            primus_encoding::PlaintextEmbedding::Centered,
+        );
 
         table.transform_slice(b.0);
 
@@ -515,7 +520,6 @@ impl<T: FheUint> DcrtGlweSecretKey<T> {
         B: DataMut<Elem = T>,
     {
         assert_eq!(context.size(), params.size());
-        let poly_length = params.poly_length();
 
         let DcrtGlweDecryptContextRefMut {
             msg_mod_q,
@@ -526,9 +530,11 @@ impl<T: FheUint> DcrtGlweSecretKey<T> {
 
         table.inverse_transform_slice(msg_mod_q.as_mut());
 
-        params
-            .codec()
-            .decode_coeffs(msg_mod_q, msg, poly_length, fast_convert_buffer);
+        params.codec().decode_coeffs_to(
+            &mut CrtPolynomial(msg_mod_q.as_mut()),
+            msg,
+            fast_convert_buffer,
+        );
     }
 }
 

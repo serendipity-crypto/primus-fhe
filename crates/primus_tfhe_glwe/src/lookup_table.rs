@@ -92,7 +92,7 @@ where
         F: Fn(usize) -> T,
     {
         let plaintext_modulus = self.plain_modulus_value();
-        let codec = self.glwe().plaintext_codec();
+        let codec = self.small_lwe().plaintext_codec();
         self.compile_encoded_lookup_table(domain_len, |input| {
             let output = output_at(input);
             if output >= plaintext_modulus {
@@ -113,7 +113,7 @@ where
         F: Fn(usize, usize) -> T,
     {
         let plaintext_modulus = self.plain_modulus_value();
-        let codec = self.glwe().plaintext_codec();
+        let codec = self.small_lwe().plaintext_codec();
         self.compile_encoded_many_lookup_table(domain_len, output_count, |input, output_index| {
             let output = output_at(input, output_index);
             if output >= plaintext_modulus {

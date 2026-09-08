@@ -6,7 +6,6 @@ mod crt;
 mod dcrt;
 mod key_switch;
 mod parameter;
-mod plaintext;
 mod public_key;
 mod secret_key;
 
@@ -33,10 +32,8 @@ pub use parameter::{
     CrtGgswParameters, CrtGlevParameters, CrtGlevParametersError, CrtGlweParameters,
     DcrtGadgetDomain, GadgetDomainError, HybridRnsKeySwitchDomain,
 };
-pub use plaintext::RnsCoeffCodec;
-pub use primus_glwe::{
-    GlweSecretKey, GlweSecretKeyParameterSet, SecretCoefficient, SecretKeyDistr,
-};
+pub use primus_encoding::BfvRnsCodec;
+pub use primus_glwe::{GlweSecretKey, GlweSecretKeyParameterSet, SecretKeyDistr};
 pub use primus_lattice::{RnsGadgetSize, RnsGlweSize};
 pub use public_key::DcrtGlwePublicKey;
 pub use secret_key::{DcrtGlweDecryptContext, DcrtGlweSecretKey};

@@ -14,7 +14,7 @@ pub type MultiMsgLweCiphertext<T> = primus_lattice::lwe::MultiMsgLwe<Vec<T>>;
 
 pub use key_switch::LweKeySwitchingKey;
 pub use parameter::{LweKeySwitchingParameters, LweParameters};
-pub use primus_fhe_core::{SecretCoefficient, SecretKeyDistr};
+pub use primus_distr::SecretKeyDistr;
 pub use secret_key::LweSecretKey;
 
-use primus_fhe_core::plaintext::{PlaintextCodec, PlaintextEmbedding};
+use primus_encoding::{PlaintextEmbedding, RoundedCodec};

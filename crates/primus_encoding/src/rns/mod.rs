@@ -2,4 +2,4 @@
 
 mod coeff_codec;
 
-pub use coeff_codec::RnsCoeffCodec;
+pub use coeff_codec::BfvRnsCodec;

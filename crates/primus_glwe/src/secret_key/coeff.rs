@@ -8,8 +8,6 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{GlweParameters, SecretKeyDistr};
 
-use crate::SecretCoefficient;
-
 /// Common secret-key shape exposed by single-modulus and RNS GLWE parameters.
 pub trait GlweSecretKeyParameterSet<T: FheUint> {
     /// Returns the GLWE secret-key layout.
@@ -36,7 +34,7 @@ where
 /// Represents a secret key for the Module Learning with Errors (MLWE) cryptographic scheme.
 #[derive(Clone)]
 pub struct GlweSecretKey<T: FheUint> {
-    pub(crate) key: Vec<SecretCoefficient<T>>,
+    pub(crate) key: Vec<T::SignedInteger>,
     pub(crate) glwe_size: GlweSize,
     pub(crate) distr: SecretKeyDistr,
 }
@@ -53,7 +51,7 @@ impl<T: FheUint> ZeroizeOnDrop for GlweSecretKey<T> {}
 impl<T: FheUint> GlweSecretKey<T> {
     /// Creates a new [`GlweSecretKey<T>`].
     #[inline]
-    pub fn new(key: Vec<SecretCoefficient<T>>, glwe_size: GlweSize, distr: SecretKeyDistr) -> Self {
+    pub fn new(key: Vec<T::SignedInteger>, glwe_size: GlweSize, distr: SecretKeyDistr) -> Self {
         assert_eq!(key.len(), glwe_size.mask_len());
         Self {
             key,
@@ -88,15 +86,13 @@ impl<T: FheUint> GlweSecretKey<T> {
 
     /// Returns all coefficient-domain secret-key values.
     #[inline]
-    pub fn as_slice(&self) -> &[SecretCoefficient<T>] {
+    pub fn as_slice(&self) -> &[T::SignedInteger] {
         &self.key
     }
 
     /// Iterates over the coefficient-domain secret polynomials.
     #[inline]
-    pub fn iter(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &[SecretCoefficient<T>]> + DoubleEndedIterator {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &[T::SignedInteger]> + DoubleEndedIterator {
         self.key.chunks_exact(self.glwe_size.poly_length())
     }
 

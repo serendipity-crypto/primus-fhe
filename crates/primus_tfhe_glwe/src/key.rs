@@ -4,7 +4,7 @@ use primus_lattice::GlweSize;
 use primus_reduce::RingContext;
 use primus_tfhe::LweSecretKeyRef;
 
-use crate::{GlwePbsOrder, GlweSecretKey, GlweTfheParameters, LweSecretKey, SecretCoefficient};
+use crate::{GlwePbsOrder, GlweSecretKey, GlweTfheParameters, LweSecretKey};
 
 /// The complete client-side secret material for GLWE-based TFHE.
 ///
@@ -80,7 +80,7 @@ impl<T: FheUint> GlweClientKey<T> {
             .checked_next_multiple_of(poly_length)
             .expect("validated TFHE dimensions must fit in usize");
 
-        let mut key = vec![SecretCoefficient::<T>::ZERO; capacity];
+        let mut key = vec![T::SignedInteger::ZERO; capacity];
         let distribution = lwe_secret_key.distr();
         assert!(
             distribution.is_binary(),

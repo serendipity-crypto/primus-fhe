@@ -9,8 +9,8 @@ use primus_poly::{FourierPolynomialIter, FourierPolynomialOwned, Polynomial, Pol
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    FourierGlweCiphertext, GlevParameters, GlweParameters, GlweParametersInner, PlaintextCodec,
-    PlaintextEmbedding, SecretKeyDistr,
+    FourierGlweCiphertext, GlevParameters, GlweParameters, GlweParametersInner, PlaintextEmbedding,
+    ScaledCodec, SecretKeyDistr,
 };
 
 use super::GlweSecretKey;
@@ -328,7 +328,7 @@ impl FourierGlweSecretKey {
                 embedding,
                 codec,
             } => {
-                codec.add_encode_slice_assign_with_delta(coeff, values, embedding);
+                codec.add_encode_slice_assign(coeff, values, embedding);
             }
             FourierEncryptionMessage::Encoded(encoded) => {
                 Polynomial::new(&mut *coeff)
@@ -418,7 +418,7 @@ impl FourierGlweSecretKey {
         self.phase_to(cipher, result, fft, context);
         params
             .plaintext_codec()
-            .decode_slice_inplace(result.as_mut());
+            .decode_slice_assign(result.as_mut());
     }
 }
 
@@ -427,7 +427,7 @@ enum FourierEncryptionMessage<'a, T: FheUint> {
     Plaintext {
         values: &'a [T],
         embedding: PlaintextEmbedding,
-        codec: &'a PlaintextCodec<T>,
+        codec: &'a ScaledCodec<T>,
     },
     Encoded(&'a [T]),
 }

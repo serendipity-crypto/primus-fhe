@@ -7,7 +7,7 @@ use primus_lattice::{GadgetSize, GlweSize};
 use primus_reduce::RingContext;
 use rand::distr::Uniform;
 
-use crate::{PlaintextCodec, SecretKeyDistr};
+use crate::{ScaledCodec, SecretKeyDistr};
 
 /// GLWE encryption parameters shared by ordinary and gadget ciphertexts.
 ///
@@ -141,7 +141,7 @@ where
 {
     size: GlweSize,
     inner: GlweParametersInner<T, M>,
-    plaintext_codec: PlaintextCodec<T>,
+    plaintext_codec: ScaledCodec<T>,
 }
 
 impl<T, M> GlweParameters<T, M>
@@ -150,6 +150,9 @@ where
     M: RingContext<T>,
 {
     /// Creates a new [`GlweParameters<T, M>`].
+    ///
+    /// Plaintext parameters must satisfy [`ScaledCodec::new`]'s fixed-scale
+    /// recovery bound; invalid parameters panic.
     pub fn new(
         dimension: usize,
         poly_length: usize,
@@ -163,7 +166,7 @@ where
             .validate_for_length(size.mask_len())
             .expect("invalid GLWE secret-key distribution");
         let cipher_modulus_value = cipher_modulus.explicit_value();
-        let plaintext_codec = PlaintextCodec::new(plain_modulus_value, cipher_modulus_value);
+        let plaintext_codec = ScaledCodec::new(plain_modulus_value, cipher_modulus_value);
 
         let inner =
             GlweParametersInner::new(cipher_modulus, secret_key_distr, noise_standard_deviation);
@@ -236,7 +239,7 @@ where
 
     /// Returns the preselected plaintext codec strategy.
     #[inline]
-    pub fn plaintext_codec(&self) -> &PlaintextCodec<T> {
+    pub fn plaintext_codec(&self) -> &ScaledCodec<T> {
         &self.plaintext_codec
     }
 

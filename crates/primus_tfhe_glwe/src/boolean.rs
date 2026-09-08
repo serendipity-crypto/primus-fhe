@@ -4,7 +4,7 @@ use primus_tfhe::{Ciphertext, LookupTable, LookupTableError, ProgrammableBootstr
 
 use crate::{
     GlweClientError, GlweClientKey, GlweDecryptor, GlweEncryptor, GlweTfheParameters,
-    LweCiphertext, PlaintextCodec, PlaintextEmbedding, TfheEvaluationError,
+    LweCiphertext, PlaintextEmbedding, RoundedCodec, TfheEvaluationError,
 };
 
 /// The complete plaintext modulus used by the Boolean gate encoding.
@@ -197,7 +197,7 @@ where
             compile_boolean_lookup_table(parameters, [false, true])?,
             compile_boolean_lookup_table(parameters, [true, false])?,
         ];
-        let output_shift = PlaintextCodec::new(
+        let output_shift = RoundedCodec::new(
             boolean_accumulator_plaintext_modulus::<T>(),
             parameters.small_lwe().cipher_modulus().explicit_value(),
         )
@@ -465,7 +465,7 @@ where
     GM: RingContext<T>,
 {
     let modulus = parameters.glwe().cipher_modulus();
-    let positive_value = PlaintextCodec::new(
+    let positive_value = RoundedCodec::new(
         boolean_accumulator_plaintext_modulus::<T>(),
         modulus.explicit_value(),
     )

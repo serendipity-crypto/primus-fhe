@@ -2,12 +2,12 @@
 
 use primus_decompose::{ApproxSignedBasisError, primitive::ApproxSignedBasis};
 use primus_distr::{DiscreteGaussian, SignedDiscreteGaussian};
-use primus_fhe_core::plaintext::PlaintextCodec;
+use primus_encoding::ScaledCodec;
 use primus_integer::FheUint;
 use primus_lattice::{MAX_POLY_LENGTH, MIN_POLY_LENGTH};
 use primus_reduce::RingContext;
 
-use crate::{SecretCoefficient, SecretKeyDistr};
+use crate::SecretKeyDistr;
 
 /// Maximum number of coefficient keys sampled while searching for an
 /// invertible transform-domain NTRU key.
@@ -27,9 +27,9 @@ where
     poly_length: usize,
     cipher_modulus: M,
     secret_key_distr: SecretKeyDistr,
-    secret_key_distribution: Option<SignedDiscreteGaussian<SecretCoefficient<T>>>,
+    secret_key_distribution: Option<SignedDiscreteGaussian<T::SignedInteger>>,
     noise_distribution: DiscreteGaussian<T>,
-    plaintext_codec: PlaintextCodec<T>,
+    plaintext_codec: ScaledCodec<T>,
 }
 
 impl<T, M> NtruParameters<T, M>
@@ -45,7 +45,8 @@ where
     /// # Panics
     ///
     /// Panics if the polynomial length, plaintext modulus, ciphertext modulus,
-    /// or Gaussian parameters are invalid.
+    /// or Gaussian parameters are invalid, including failure of
+    /// [`ScaledCodec::new`]'s fixed-scale recovery bound.
     pub fn new(
         poly_length: usize,
         plain_modulus: T,
@@ -62,7 +63,7 @@ where
             .validate_for_length(poly_length)
             .expect("invalid NTRU secret-key distribution");
 
-        let plaintext_codec = PlaintextCodec::new(plain_modulus, cipher_modulus.explicit_value());
+        let plaintext_codec = ScaledCodec::new(plain_modulus, cipher_modulus.explicit_value());
         let modulus_minus_one = cipher_modulus.minus_one();
         let noise_distribution = DiscreteGaussian::new(noise_standard_deviation, modulus_minus_one)
             .expect("invalid Gaussian NTRU noise distribution");
@@ -110,7 +111,7 @@ where
 
     /// Returns the plaintext codec implementing the `Delta` embedding.
     #[inline]
-    pub fn plaintext_codec(&self) -> &PlaintextCodec<T> {
+    pub fn plaintext_codec(&self) -> &ScaledCodec<T> {
         &self.plaintext_codec
     }
 
@@ -124,7 +125,7 @@ where
     #[inline]
     pub(crate) fn secret_key_distribution(
         &self,
-    ) -> Option<&SignedDiscreteGaussian<SecretCoefficient<T>>> {
+    ) -> Option<&SignedDiscreteGaussian<T::SignedInteger>> {
         self.secret_key_distribution.as_ref()
     }
 

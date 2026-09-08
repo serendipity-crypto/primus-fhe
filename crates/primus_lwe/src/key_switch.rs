@@ -5,10 +5,10 @@ use primus_integer::{FheUint, SignedInteger};
 use primus_lattice::lwe::Lwe;
 use primus_reduce::RingContext;
 
-use crate::{LweKeySwitchingParameters, LweParameters, LweSecretKey, SecretCoefficient};
+use crate::{LweKeySwitchingParameters, LweParameters, LweSecretKey};
 
 #[inline]
-fn encode_secret_coefficient<T: FheUint>(coefficient: SecretCoefficient<T>, modulus: T) -> T {
+fn encode_secret_coefficient<T: FheUint>(coefficient: T::SignedInteger, modulus: T) -> T {
     if coefficient.is_negative() {
         debug_assert!(coefficient.unsigned_abs() < modulus);
         modulus.wrapping_add_signed(coefficient)
@@ -57,7 +57,7 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
 
     /// Generates a key switching from canonical signed input coefficients.
     pub fn generate_from_signed<R, M>(
-        input_secret_key: &[SecretCoefficient<T>],
+        input_secret_key: &[T::SignedInteger],
         output_secret_key: &LweSecretKey<T>,
         output_parameters: &LweParameters<T, M>,
         parameters: &LweKeySwitchingParameters<T>,

@@ -1,6 +1,6 @@
 use num_traits::Signed;
 use primus_distr::DiscreteGaussian;
-use primus_fhe_core::{SecretCoefficient, plaintext::PlaintextEmbedding};
+use primus_encoding::PlaintextEmbedding;
 use primus_integer::{FheUint, SignedInteger};
 use primus_lwe::LweCiphertext;
 use primus_reduce::RingContext;
@@ -184,12 +184,12 @@ where
 /// Encrypts an LWE sample with a canonical signed ring secret.
 #[allow(clippy::too_many_arguments)]
 fn encrypt_lwe_with_signed_secret<T, M, R>(
-    secret_key: &[SecretCoefficient<T>],
+    secret_key: &[T::SignedInteger],
     message: T,
     modulus: M,
     uniform: Uniform<T>,
     gaussian: &DiscreteGaussian<T>,
-    codec: &primus_fhe_core::plaintext::PlaintextCodec<T>,
+    codec: &primus_encoding::RoundedCodec<T>,
     embedding: PlaintextEmbedding,
     rng: &mut R,
 ) -> LweCiphertext<T>
@@ -212,13 +212,13 @@ where
             .map(|coefficient| encode_for_ring(coefficient, modulus)),
     );
     *ciphertext.b_mut() = modulus.reduce_add(dot_product, gaussian.sample(rng));
-    codec.add_encode_value(ciphertext.b_mut(), message, embedding);
+    codec.add_encode_value_assign(ciphertext.b_mut(), message, embedding);
     ciphertext
 }
 
 /// Encodes a signed secret coefficient in an explicit or native ring.
 #[inline]
-fn encode_for_ring<T, M>(coefficient: SecretCoefficient<T>, modulus: M) -> T
+fn encode_for_ring<T, M>(coefficient: T::SignedInteger, modulus: M) -> T
 where
     T: FheUint,
     M: RingContext<T>,

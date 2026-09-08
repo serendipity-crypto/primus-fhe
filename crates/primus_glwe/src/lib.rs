@@ -11,7 +11,7 @@ mod scheme_switch;
 mod secret_key;
 mod trace;
 
-use primus_fhe_core::plaintext::{PlaintextCodec, PlaintextEmbedding};
+use primus_encoding::{PlaintextEmbedding, ScaledCodec};
 
 pub use automorphism::{NttGlweAutomorphismContext, NttGlweAutomorphismKey};
 pub use ciphertext::{
@@ -27,7 +27,7 @@ pub use parameter::{
     GadgetDomainError, GadgetSize, GgswParameters, GlevParameters, GlweKeySwitchingParameters,
     GlweParameters, GlweParametersInner, GlweSize, GlweSizeError, NttGadgetDomain,
 };
-pub use primus_fhe_core::{SecretCoefficient, SecretKeyDistr};
+pub use primus_distr::SecretKeyDistr;
 pub use public_key::NttGlwePublicKey;
 pub use scheme_switch::{NttGlweSchemeSwitchContext, NttGlweSchemeSwitchKey};
 pub use secret_key::{

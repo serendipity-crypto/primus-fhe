@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-//! Sampling distributions for FHE noise generation.
+//! Sampling distributions and secret-key distribution parameters for FHE.
 //!
 //! This crate provides samplers for discrete probability distributions used
 //! in fully homomorphic encryption (FHE) schemes:
@@ -13,6 +13,10 @@
 //!   modulus.
 //! - **Signed discrete Gaussian** ([`SignedDiscreteGaussian`]) — centered
 //!   discrete Gaussian with support on signed integers.
+//!
+//! [`SecretKeyDistr`] describes secret-coefficient distributions and validates
+//! probabilities and fixed weights. Cryptosystems select supported variants;
+//! Gaussian sampler constructors validate Gaussian parameters.
 //!
 //! # Sampler selection
 //!
@@ -66,3 +70,6 @@ pub use signed_discrete_gaussian::SignedPreciseCDTSampler;
 pub use signed_discrete_gaussian::{
     SignedCDTSampler, SignedDiscreteGaussian, SignedDiscreteZiggurat,
 };
+
+mod secret_key_distr;
+pub use secret_key_distr::{SecretKeyDistr, SecretKeyDistrError};

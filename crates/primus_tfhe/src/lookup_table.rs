@@ -1,6 +1,6 @@
 use core::fmt;
 
-use primus_fhe_core::plaintext::{PlaintextCodec, PlaintextEmbedding};
+use primus_encoding::{PlaintextEmbedding, RoundedCodec};
 use primus_integer::FheUint;
 use primus_poly::{Polynomial, PolynomialOwned};
 use primus_reduce::RingContext;
@@ -109,7 +109,7 @@ pub fn lookup_table_domain_len<T: FheUint>(
 pub fn compile_encoded_lookup_table<T, M, F>(
     domain_len: usize,
     poly_length: usize,
-    lwe_codec: &PlaintextCodec<T>,
+    lwe_codec: &RoundedCodec<T>,
     lwe_modulus: Option<T>,
     accumulator_modulus: M,
     encoded_output_at: F,
@@ -175,7 +175,7 @@ pub fn compile_encoded_many_lookup_table<T, M, F>(
     domain_len: usize,
     poly_length: usize,
     output_count: usize,
-    lwe_codec: &PlaintextCodec<T>,
+    lwe_codec: &RoundedCodec<T>,
     lwe_modulus: Option<T>,
     accumulator_modulus: M,
     encoded_output_at: F,

@@ -26,6 +26,15 @@ representations, CRT batch layouts, and statistical diagnostics.
 All sampler types implement `rand::distr::Distribution`. Batch helpers require
 an RNG implementing both `rand::Rng` and `rand::CryptoRng`.
 
+## Secret-key distribution parameters
+
+`SecretKeyDistr` describes binary, ternary, fixed-weight, and Gaussian secret
+coefficient distributions; it is a parameter enum, not a sampler.
+`validate_for_length` checks probabilities and weights for the complete logical
+key and returns `SecretKeyDistrError` on failure. Gaussian parameters are checked
+by the selected Gaussian sampler constructor. Each cryptosystem determines
+which variants it supports.
+
 ## Example
 
 ```rust

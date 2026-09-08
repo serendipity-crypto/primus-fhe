@@ -5,13 +5,13 @@ mod dcrt;
 use num_traits::Signed;
 use primus_integer::{FheUint, SignedInteger};
 
-use crate::{GlweSecretKey, SecretCoefficient};
+use crate::GlweSecretKey;
 
 pub use dcrt::{DcrtGlweDecryptContext, DcrtGlweSecretKey};
 
 #[inline]
 pub(crate) fn encode_secret_coefficient<T: FheUint>(
-    coefficient: SecretCoefficient<T>,
+    coefficient: T::SignedInteger,
     modulus: T,
 ) -> T {
     if coefficient.is_negative() {
@@ -25,7 +25,7 @@ pub(crate) fn encode_secret_coefficient<T: FheUint>(
 }
 
 fn encode_secret_polynomial_to<T: FheUint>(
-    coefficients: &[SecretCoefficient<T>],
+    coefficients: &[T::SignedInteger],
     output: &mut [T],
     modulus: T,
 ) {
@@ -39,7 +39,7 @@ fn encode_secret_polynomial_to<T: FheUint>(
 }
 
 pub(crate) fn encode_secret_polynomial_to_rns<T: FheUint>(
-    coefficients: &[SecretCoefficient<T>],
+    coefficients: &[T::SignedInteger],
     output: &mut [T],
     moduli: &[T],
 ) {

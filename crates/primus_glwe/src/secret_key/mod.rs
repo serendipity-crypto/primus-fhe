@@ -8,15 +8,13 @@ mod ntt;
 use num_traits::Signed;
 use primus_integer::{FheUint, SignedInteger};
 
-use crate::SecretCoefficient;
-
 pub use coeff::{GlweSecretKey, GlweSecretKeyParameterSet};
 pub use fourier::{FourierGlweDecryptContext, FourierGlweEncryptContext, FourierGlweSecretKey};
 pub use gadget::{FourierGadgetEncryptContext, NttGadgetEncryptContext};
 pub use ntt::NttGlweSecretKey;
 
 pub(crate) fn encode_secret_polynomial_to<T: FheUint>(
-    coefficients: &[SecretCoefficient<T>],
+    coefficients: &[T::SignedInteger],
     output: &mut [T],
     modulus: T,
 ) {

@@ -1,4 +1,4 @@
-use primus_fhe_core::plaintext::PlaintextEmbedding;
+use primus_encoding::PlaintextEmbedding;
 use primus_integer::FheUint;
 use primus_reduce::RingContext;
 use primus_tfhe::{
@@ -57,6 +57,10 @@ where
     {
         let plaintext_modulus = self.plain_modulus_value();
         let ntru = self.bootstrapping().ntru();
+        let output_codec = primus_encoding::RoundedCodec::new(
+            plaintext_modulus,
+            ntru.cipher_modulus().explicit_value(),
+        );
         compile_encoded_lookup_table(
             domain_len,
             self.poly_length(),
@@ -68,9 +72,7 @@ where
                 if output >= plaintext_modulus {
                     Err(LookupTableError::OutputOutOfRange { input })
                 } else {
-                    Ok(ntru
-                        .plaintext_codec()
-                        .encode_value(output, PlaintextEmbedding::Unsigned))
+                    Ok(output_codec.encode_value(output, PlaintextEmbedding::Unsigned))
                 }
             },
         )

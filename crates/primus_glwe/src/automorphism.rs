@@ -12,7 +12,7 @@ use primus_reduce::{FieldContext, ReduceMul};
 
 use crate::{
     GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext, NttGlweKeySwitchingContext,
-    NttGlweKeySwitchingKey, NttGlweSecretKey, SecretCoefficient,
+    NttGlweKeySwitchingKey, NttGlweSecretKey,
 };
 
 #[derive(Clone, Copy)]
@@ -64,8 +64,8 @@ impl CoeffAutoPermutation {
 
     fn apply_secret<T: FheUint>(
         &self,
-        input: &[SecretCoefficient<T>],
-        output: &mut [SecretCoefficient<T>],
+        input: &[T::SignedInteger],
+        output: &mut [T::SignedInteger],
     ) {
         debug_assert_eq!(input.len(), self.poly_length());
         debug_assert_eq!(output.len(), self.poly_length());
@@ -191,7 +191,7 @@ impl<T: FheUint> NttGlweAutomorphismKey<T> {
         let coeff_permutation = CoeffAutoPermutation::new(degree, poly_len);
         let ntt_permutation = NttAutoPermutation::new(degree, poly_len);
 
-        let mut transformed_secret = vec![SecretCoefficient::<T>::ZERO; size.mask_len()];
+        let mut transformed_secret = vec![T::SignedInteger::ZERO; size.mask_len()];
 
         for (input, output) in secret_key
             .iter()

@@ -1,4 +1,4 @@
-use primus_fhe_core::plaintext::PlaintextEmbedding;
+use primus_encoding::PlaintextEmbedding;
 use primus_glwe::{
     GlweParameters, GlweSecretKey, NttGlweCiphertext, NttGlwePublicKey, NttGlweSecretKey,
     SecretKeyDistr,
@@ -42,7 +42,7 @@ fn additional_glwe_workflows() {
 
     let mut noiseless: NttGlweCiphertext<Vec<u64>> = NttGlweCiphertext::zero(params.glwe_len());
     let (_, body) = noiseless.a_b_mut_slices(POLY_LENGTH);
-    params.plaintext_codec().add_encode_slice_assign_with_delta(
+    params.plaintext_codec().add_encode_slice_assign(
         body,
         message.as_ref(),
         PlaintextEmbedding::Unsigned,

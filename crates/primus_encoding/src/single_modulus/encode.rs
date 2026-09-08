@@ -1,25 +1,26 @@
 use primus_integer::FheUint;
 
 use super::{
-    PlaintextCodec,
+    RoundedCodec,
     helpers::{checked_message, lift_centered_from_raw},
-    strategy::{CodecStrategy, dispatch_strategy},
+    rounded::{RoundedEncoding, dispatch_strategy},
 };
 use crate::PlaintextEmbedding;
 
-impl<T: FheUint> PlaintextCodec<T> {
+impl<T: FheUint> RoundedCodec<T> {
     /// Encodes one message using the selected embedding.
     ///
     /// # Panics
     ///
     /// Panics if the message cannot be represented by `T` or lies outside the
     /// plaintext domain.
+    #[must_use]
     #[inline]
     pub fn encode_value<M>(&self, message: M, embedding: PlaintextEmbedding) -> T
     where
         M: TryInto<T>,
     {
-        let message = checked_message(message);
+        let message = checked_message(message, self.t);
         let (magnitude, is_negative) = match embedding {
             PlaintextEmbedding::Unsigned => (message, false),
             PlaintextEmbedding::Centered => {
@@ -28,7 +29,7 @@ impl<T: FheUint> PlaintextCodec<T> {
         };
 
         dispatch_strategy!(&self.strategy, codec => {
-            let encoded = codec.encode_exact(magnitude, self.t);
+            let encoded = codec.encode_magnitude(magnitude, self.t);
             if is_negative {
                 codec.neg(encoded)
             } else {
@@ -45,21 +46,37 @@ impl<T: FheUint> PlaintextCodec<T> {
     /// plaintext domain.
     #[inline]
     pub fn encode_slice_to(&self, messages: &[T], output: &mut [T], embedding: PlaintextEmbedding) {
-        assert_eq!(messages.len(), output.len());
+        assert_eq!(
+            messages.len(),
+            output.len(),
+            "encoding slice length mismatch"
+        );
+        assert!(
+            messages.iter().copied().max().is_none_or(|m| m < self.t),
+            "message outside plaintext domain"
+        );
+        if let RoundedEncoding::Integer(scale) = &self.strategy {
+            scale.apply::<false, _>(
+                output.iter_mut().zip(messages.iter().copied()),
+                self.t,
+                embedding,
+            );
+            return;
+        }
         let t = self.t;
 
         dispatch_strategy!(&self.strategy, codec => {
             match embedding {
                 PlaintextEmbedding::Unsigned => {
                     for (&message, output) in messages.iter().zip(output) {
-                        *output = codec.encode_exact(message, t);
+                        *output = codec.encode_magnitude(message, t);
                     }
                 }
                 PlaintextEmbedding::Centered => {
                     for (&message, output) in messages.iter().zip(output) {
                         let (magnitude, is_negative) =
                             lift_centered_from_raw(message, t, self.centered_half);
-                        let encoded = codec.encode_exact(magnitude, t);
+                        let encoded = codec.encode_magnitude(magnitude, t);
                         *output = if is_negative {
                             codec.neg(encoded)
                         } else {
@@ -77,21 +94,36 @@ impl<T: FheUint> PlaintextCodec<T> {
     ///
     /// Panics if a value lies outside the plaintext domain.
     #[inline]
-    pub fn encode_slice_inplace(&self, values: &mut [T], embedding: PlaintextEmbedding) {
+    pub fn encode_slice_assign(&self, values: &mut [T], embedding: PlaintextEmbedding) {
+        assert!(
+            values.iter().copied().max().is_none_or(|m| m < self.t),
+            "message outside plaintext domain"
+        );
+        if let RoundedEncoding::Integer(scale) = &self.strategy {
+            scale.apply::<false, _>(
+                values.iter_mut().map(|out| {
+                    let m = *out;
+                    (out, m)
+                }),
+                self.t,
+                embedding,
+            );
+            return;
+        }
         let t = self.t;
 
         dispatch_strategy!(&self.strategy, codec => {
             match embedding {
                 PlaintextEmbedding::Unsigned => {
                     for value in values {
-                        *value = codec.encode_exact(*value, t);
+                        *value = codec.encode_magnitude(*value, t);
                     }
                 }
                 PlaintextEmbedding::Centered => {
                     for value in values {
                         let (magnitude, is_negative) =
                             lift_centered_from_raw(*value, t, self.centered_half);
-                        let encoded = codec.encode_exact(magnitude, t);
+                        let encoded = codec.encode_magnitude(magnitude, t);
                         *value = if is_negative {
                             codec.neg(encoded)
                         } else {
@@ -101,29 +133,5 @@ impl<T: FheUint> PlaintextCodec<T> {
                 }
             }
         });
-    }
-
-    /// Encodes `message` as `lift(message) * delta mod q`.
-    #[inline]
-    pub fn encode_value_with_delta<M>(&self, message: M, embedding: PlaintextEmbedding) -> T
-    where
-        M: TryInto<T>,
-    {
-        let message = checked_message(message);
-        let (magnitude, is_negative) = match embedding {
-            PlaintextEmbedding::Unsigned => (message, false),
-            PlaintextEmbedding::Centered => {
-                lift_centered_from_raw(message, self.t, self.centered_half)
-            }
-        };
-
-        dispatch_strategy!(&self.strategy, codec => {
-            let encoded = codec.encode_delta(magnitude, self.t);
-            if is_negative {
-                codec.neg(encoded)
-            } else {
-                encoded
-            }
-        })
     }
 }

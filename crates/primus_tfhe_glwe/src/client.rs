@@ -5,8 +5,8 @@ use primus_tfhe::Ciphertext;
 use rand::distr::{Distribution, Uniform};
 
 use crate::{
-    GlweClientKey, GlweKeyError, GlwePbsOrder, GlweTfheParameters, LweCiphertext, PlaintextCodec,
-    PlaintextEmbedding, SecretCoefficient, encode_secret_coefficient,
+    GlweClientKey, GlweKeyError, GlwePbsOrder, GlweTfheParameters, LweCiphertext,
+    PlaintextEmbedding, RoundedCodec, encode_secret_coefficient,
 };
 
 /// Encrypts raw TFHE messages with a particular encryption key.
@@ -143,6 +143,7 @@ where
                 )
             }
             GlwePbsOrder::KeyswitchBootstrap => {
+                // TFHE construction validates equal t and q for both key domains.
                 let parameters = self.parameters.glwe();
                 encrypt_lwe_with_signed_secret(
                     self.key.glwe_secret_key().as_slice(),
@@ -150,7 +151,7 @@ where
                     parameters.cipher_modulus(),
                     parameters.cipher_modulus_uniform_distr(),
                     parameters.noise_distribution(),
-                    parameters.plaintext_codec(),
+                    self.parameters.small_lwe().plaintext_codec(),
                     embedding,
                     rng,
                 )
@@ -207,12 +208,13 @@ where
                 )
             }
             GlwePbsOrder::KeyswitchBootstrap => {
+                // TFHE construction validates equal t and q for both key domains.
                 let parameters = self.parameters.glwe();
                 decrypt_lwe_with_signed_secret(
                     self.key.glwe_secret_key().as_slice(),
                     ciphertext.as_lwe(),
                     parameters.cipher_modulus(),
-                    parameters.plaintext_codec(),
+                    self.parameters.small_lwe().plaintext_codec(),
                 )
             }
         };
@@ -227,7 +229,7 @@ fn encrypt_lwe_with_secret<T, M, R>(
     modulus: M,
     uniform: Uniform<T>,
     gaussian: &DiscreteGaussian<T>,
-    codec: &PlaintextCodec<T>,
+    codec: &RoundedCodec<T>,
     embedding: PlaintextEmbedding,
     rng: &mut R,
 ) -> LweCiphertext<T>
@@ -238,7 +240,7 @@ where
 {
     let mut ciphertext =
         LweCiphertext::generate_random_zero_sample(secret_key, modulus, uniform, gaussian, rng);
-    codec.add_encode_value(ciphertext.b_mut(), message, embedding);
+    codec.add_encode_value_assign(ciphertext.b_mut(), message, embedding);
     ciphertext
 }
 
@@ -246,7 +248,7 @@ fn decrypt_lwe_with_secret<T, M>(
     secret_key: &[T],
     ciphertext: &LweCiphertext<T>,
     modulus: M,
-    codec: &PlaintextCodec<T>,
+    codec: &RoundedCodec<T>,
 ) -> T
 where
     T: FheUint,
@@ -260,12 +262,12 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn encrypt_lwe_with_signed_secret<T, M, R>(
-    secret_key: &[SecretCoefficient<T>],
+    secret_key: &[T::SignedInteger],
     message: T,
     modulus: M,
     uniform: Uniform<T>,
     gaussian: &DiscreteGaussian<T>,
-    codec: &PlaintextCodec<T>,
+    codec: &RoundedCodec<T>,
     embedding: PlaintextEmbedding,
     rng: &mut R,
 ) -> LweCiphertext<T>
@@ -288,15 +290,15 @@ where
             .map(|coefficient| encode_for_ring(coefficient, modulus)),
     );
     *ciphertext.b_mut() = modulus.reduce_add(dot_product, gaussian.sample(rng));
-    codec.add_encode_value(ciphertext.b_mut(), message, embedding);
+    codec.add_encode_value_assign(ciphertext.b_mut(), message, embedding);
     ciphertext
 }
 
 fn decrypt_lwe_with_signed_secret<T, M>(
-    secret_key: &[SecretCoefficient<T>],
+    secret_key: &[T::SignedInteger],
     ciphertext: &LweCiphertext<T>,
     modulus: M,
-    codec: &PlaintextCodec<T>,
+    codec: &RoundedCodec<T>,
 ) -> T
 where
     T: FheUint,
@@ -315,7 +317,7 @@ where
 }
 
 #[inline]
-fn encode_for_ring<T, M>(coefficient: SecretCoefficient<T>, modulus: M) -> T
+fn encode_for_ring<T, M>(coefficient: T::SignedInteger, modulus: M) -> T
 where
     T: FheUint,
     M: RingContext<T>,

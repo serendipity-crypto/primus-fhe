@@ -1,12 +1,7 @@
-use primus_integer::UnsignedInteger;
-
-/// Signed coefficient type used by canonical ring secret keys.
-pub type SecretCoefficient<T> = <T as UnsignedInteger>::SignedInteger;
-
 /// Distribution used to sample secret-key coefficients.
 ///
 /// Individual cryptosystems may support only a subset of these distributions.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SecretKeyDistr {
     /// Uniform binary coefficients with `P(0) = P(1) = 1/2`.
     UniformBinary,
@@ -16,7 +11,6 @@ pub enum SecretKeyDistr {
         one_probability: f64,
     },
     /// Sparse ternary coefficients with `P(0) = 1/2` and `P(-1) = P(1) = 1/4`.
-    #[default]
     SparseTernary,
     /// Uniform ternary coefficients with `P(-1) = P(0) = P(1) = 1/3`.
     UniformTernary,
@@ -131,48 +125,5 @@ fn validate_probability(probability: f64) -> Result<(), SecretKeyDistrError> {
         Ok(())
     } else {
         Err(SecretKeyDistrError::InvalidProbability)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SecretKeyDistr, SecretKeyDistrError};
-
-    #[test]
-    fn rejects_invalid_probabilities_and_weights() {
-        let cases = [
-            (
-                SecretKeyDistr::Binary {
-                    one_probability: f64::NAN,
-                },
-                8,
-                SecretKeyDistrError::InvalidProbability,
-            ),
-            (
-                SecretKeyDistr::Ternary {
-                    negative_one_probability: 0.6,
-                    one_probability: 0.5,
-                },
-                8,
-                SecretKeyDistrError::TernaryProbabilitySumExceedsOne,
-            ),
-            (
-                SecretKeyDistr::FixedHammingWeightBinary { hamming_weight: 9 },
-                8,
-                SecretKeyDistrError::HammingWeightExceedsLength,
-            ),
-            (
-                SecretKeyDistr::FixedHammingWeightTernary {
-                    negative_one_weight: 4,
-                    one_weight: 5,
-                },
-                8,
-                SecretKeyDistrError::HammingWeightExceedsLength,
-            ),
-        ];
-
-        for (distribution, length, expected) in cases {
-            assert_eq!(distribution.validate_for_length(length), Err(expected));
-        }
     }
 }

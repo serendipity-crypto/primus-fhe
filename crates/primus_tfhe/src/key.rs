@@ -1,4 +1,3 @@
-use primus_fhe_core::SecretCoefficient;
 use primus_integer::FheUint;
 
 /// Borrowed coefficients of an external TFHE LWE secret key.
@@ -7,7 +6,7 @@ pub enum LweSecretKeyRef<'a, T: FheUint> {
     /// Secret coefficients already encoded in the ciphertext modulus.
     Encoded(&'a [T]),
     /// Canonical signed ring-secret coefficients viewed as an LWE key.
-    Signed(&'a [SecretCoefficient<T>]),
+    Signed(&'a [T::SignedInteger]),
 }
 
 impl<T: FheUint> LweSecretKeyRef<'_, T> {

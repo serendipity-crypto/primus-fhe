@@ -24,6 +24,13 @@ CRT 批量布局以及统计诊断。
 所有 sampler 类型均实现 `rand::distr::Distribution`。批量 helper 要求 RNG 同时实现
 `rand::Rng` 与 `rand::CryptoRng`。
 
+## 私钥分布参数
+
+`SecretKeyDistr` 描述 binary、ternary、固定权重和 Gaussian 私钥系数分布；它是参数
+枚举，不是 sampler。`validate_for_length` 针对完整逻辑密钥检查概率与权重，失败时返回
+`SecretKeyDistrError`。Gaussian 参数由所选 Gaussian sampler 的构造器检查。
+每种密码方案自行决定支持哪些分布变体。
+
 ## 示例
 
 ```rust

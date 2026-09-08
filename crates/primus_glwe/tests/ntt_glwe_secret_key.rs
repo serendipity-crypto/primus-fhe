@@ -1,4 +1,4 @@
-use primus_fhe_core::plaintext::PlaintextEmbedding;
+use primus_encoding::PlaintextEmbedding;
 use primus_glwe::{GlweParameters, GlweSecretKey, NttGlweSecretKey, SecretKeyDistr};
 use primus_integer::FheUint;
 use primus_lattice::glwe::NttGlwe;
@@ -66,7 +66,7 @@ where
         );
 
         let mut encoded = vec![T::ZERO; POLY_LENGTH];
-        params.plaintext_codec().add_encode_slice_assign_with_delta(
+        params.plaintext_codec().add_encode_slice_assign(
             &mut encoded,
             &messages,
             PlaintextEmbedding::Unsigned,

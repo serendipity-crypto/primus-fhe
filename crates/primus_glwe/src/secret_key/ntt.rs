@@ -9,8 +9,8 @@ use primus_reduce::FieldContext;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    GlevParameters, GlweParameters, GlweParametersInner, NttGlweCiphertext, PlaintextCodec,
-    PlaintextEmbedding, SecretKeyDistr, TruncatedGlweCiphertext,
+    GlevParameters, GlweParameters, GlweParametersInner, NttGlweCiphertext, PlaintextEmbedding,
+    ScaledCodec, SecretKeyDistr, TruncatedGlweCiphertext,
 };
 
 use super::{GlweSecretKey, encode_secret_polynomial_to};
@@ -307,7 +307,7 @@ impl<T: FheUint> NttGlweSecretKey<T> {
                 embedding,
                 codec,
             } => {
-                codec.add_encode_slice_assign_with_delta(b.as_mut(), values, embedding);
+                codec.add_encode_slice_assign(b.as_mut(), values, embedding);
             }
             NttEncryptionMessage::Encoded(encoded) => {
                 Polynomial::new(b.as_mut()).add_assign(&Polynomial::new(encoded), modulus);
@@ -398,7 +398,7 @@ impl<T: FheUint> NttGlweSecretKey<T> {
 
         params
             .plaintext_codec()
-            .decode_slice_inplace(result.as_mut());
+            .decode_slice_assign(result.as_mut());
     }
 
     /// Decrypts a ciphertext and returns both its message and the absolute
@@ -468,9 +468,7 @@ impl<T: FheUint> NttGlweSecretKey<T> {
             .for_each(|(phase, noise)| {
                 let phase_mod_q = *phase;
                 let decoded = params.plaintext_codec().decode_value(phase_mod_q);
-                let encoded = params
-                    .plaintext_codec()
-                    .encode_value_with_delta(decoded, embedding);
+                let encoded = params.plaintext_codec().encode_value(decoded, embedding);
 
                 *phase = decoded;
                 *noise = modulus
@@ -603,7 +601,7 @@ impl<T: FheUint> NttGlweSecretKey<T> {
     {
         assert_eq!(self.size, params.size());
         let mut messages = self.phase_multi_messages(cipher, params.cipher_modulus(), ntt_table);
-        params.plaintext_codec().decode_slice_inplace(&mut messages);
+        params.plaintext_codec().decode_slice_assign(&mut messages);
 
         messages
             .into_iter()
@@ -621,7 +619,7 @@ enum NttEncryptionMessage<'a, T: FheUint> {
     Plaintext {
         values: &'a [T],
         embedding: PlaintextEmbedding,
-        codec: &'a PlaintextCodec<T>,
+        codec: &'a ScaledCodec<T>,
     },
     Encoded(&'a [T]),
 }

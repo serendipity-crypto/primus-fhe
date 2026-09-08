@@ -4,7 +4,7 @@ use primus_integer::FheUint;
 use rand::distr::Distribution;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{NtruParameters, SecretCoefficient, SecretKeyDistr};
+use crate::{NtruParameters, SecretKeyDistr};
 
 /// A small signed polynomial `f` shared by all NTRU transform backends.
 ///
@@ -13,7 +13,7 @@ use crate::{NtruParameters, SecretCoefficient, SecretKeyDistr};
 /// bit pattern for Fourier only when the key is converted to that backend.
 #[derive(Clone)]
 pub struct NtruSecretKey<T: FheUint> {
-    pub(crate) key: Vec<SecretCoefficient<T>>,
+    pub(crate) key: Vec<T::SignedInteger>,
     pub(crate) distr: SecretKeyDistr,
 }
 
@@ -68,7 +68,7 @@ impl<T: FheUint> NtruSecretKey<T> {
 
     /// Creates a coefficient-domain NTRU key from canonical signed values.
     #[inline]
-    pub fn new(key: Vec<SecretCoefficient<T>>, distr: SecretKeyDistr) -> Self {
+    pub fn new(key: Vec<T::SignedInteger>, distr: SecretKeyDistr) -> Self {
         assert!(!key.is_empty(), "NTRU secret key must not be empty");
         Self { key, distr }
     }
@@ -87,7 +87,7 @@ impl<T: FheUint> NtruSecretKey<T> {
 
     /// Returns the canonical signed coefficients of `f`.
     #[inline]
-    pub fn as_slice(&self) -> &[SecretCoefficient<T>] {
+    pub fn as_slice(&self) -> &[T::SignedInteger] {
         &self.key
     }
 

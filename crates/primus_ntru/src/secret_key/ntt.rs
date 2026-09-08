@@ -1,7 +1,7 @@
 //! Exact explicit-modulus NTT NTRU secret key.
 
 use primus_data::{Data, DataMut};
-use primus_fhe_core::plaintext::PlaintextEmbedding;
+use primus_encoding::PlaintextEmbedding;
 use primus_integer::FheUint;
 use primus_ntt::NttTable;
 use primus_poly::{NttPolynomial, NttPolynomialOwned, Polynomial, PolynomialOwned};
@@ -389,7 +389,7 @@ impl<T: FheUint> NttNtruSecretKey<T> {
             NttEncryptionMessage::Zero => {}
             NttEncryptionMessage::Plaintext { values, embedding } => params
                 .plaintext_codec()
-                .add_encode_slice_assign_with_delta(coefficients, values, embedding),
+                .add_encode_slice_assign(coefficients, values, embedding),
             NttEncryptionMessage::Encoded(values) => Polynomial(&mut *coefficients)
                 .add_assign(&Polynomial(values), params.cipher_modulus()),
         }
@@ -456,7 +456,7 @@ impl<T: FheUint> NttNtruSecretKey<T> {
         self.phase_to(cipher, result, params, ntt_table);
         params
             .plaintext_codec()
-            .decode_slice_inplace(result.as_mut());
+            .decode_slice_assign(result.as_mut());
     }
 
     /// Decrypts and returns the absolute coefficient-wise error modulo `q`.
@@ -481,7 +481,7 @@ impl<T: FheUint> NttNtruSecretKey<T> {
             let decoded = params.plaintext_codec().decode_value(phase_mod_q);
             let encoded = params
                 .plaintext_codec()
-                .encode_value_with_delta(decoded, PlaintextEmbedding::Unsigned);
+                .encode_value(decoded, PlaintextEmbedding::Unsigned);
             *phase = decoded;
             *noise = modulus
                 .reduce_sub(phase_mod_q, encoded)

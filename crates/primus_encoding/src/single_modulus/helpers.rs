@@ -40,7 +40,7 @@ pub(super) fn centered_half<T: FheUint>(t: T) -> T {
 }
 
 #[inline]
-pub(super) fn checked_message<M, T>(message: M) -> T
+pub(super) fn convert_message<M, T>(message: M) -> T
 where
     T: FheUint,
     M: TryInto<T>,
@@ -57,5 +57,28 @@ pub(super) fn lift_centered_from_raw<T: FheUint>(message: T, t: T, half: T) -> (
         (message, false)
     } else {
         (t - message, true)
+    }
+}
+
+#[inline]
+pub(super) fn checked_message<M: TryInto<T>, T: FheUint>(message: M, t: T) -> T {
+    let message = convert_message(message);
+    assert!(message < t, "message outside plaintext domain");
+    message
+}
+
+/// Validates the modulus pair and divides the mathematical ciphertext modulus by t.
+pub(super) fn modulus_div_rem<T: FheUint>(t: T, q: Option<T>) -> (T, T) {
+    assert!(t >= T::TWO, "plaintext modulus must be at least 2");
+    assert!(
+        q.is_none_or(|q| q > t),
+        "ciphertext modulus must exceed plaintext modulus"
+    );
+    match q {
+        Some(q) => q.div_rem(t),
+        None => {
+            let quotient = T::div_wide(T::ZERO, T::ONE, t);
+            (quotient, T::ZERO.wrapping_sub(quotient.wrapping_mul(t)))
+        }
     }
 }

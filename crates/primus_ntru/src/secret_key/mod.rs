@@ -9,8 +9,6 @@ use num_traits::Signed;
 use primus_integer::{FheUint, SignedInteger};
 use primus_reduce::RingContext;
 
-use crate::SecretCoefficient;
-
 pub use coeff::NtruSecretKey;
 pub use fourier::{FourierNtruDecryptContext, FourierNtruEncryptContext, FourierNtruSecretKey};
 pub use gadget::{FourierNtruGadgetEncryptContext, NttNtruGadgetEncryptContext};
@@ -23,7 +21,7 @@ pub use ntt::NttNtruSecretKey;
 /// coefficient `-a` is represented by `q - a` for an explicit modulus and by
 /// its wrapping two's-complement residue for the native modulus.
 pub(crate) fn encode_secret_polynomial_to<T: FheUint, M: RingContext<T>>(
-    coefficients: &[SecretCoefficient<T>],
+    coefficients: &[T::SignedInteger],
     output: &mut [T],
     modulus: M,
 ) {

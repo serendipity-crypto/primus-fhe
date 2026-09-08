@@ -7,8 +7,8 @@ use std::{
 };
 
 use clap::{Args, ValueEnum};
+use primus_encoding::PlaintextEmbedding;
 use primus_fft::{Complex64, FftEngine, FftTable, RustFftTable};
-use primus_fhe_core::{SecretCoefficient, plaintext::PlaintextEmbedding};
 use primus_lattice::{MAX_POLY_LENGTH, MIN_POLY_LENGTH};
 use primus_lwe::LweParameters;
 use primus_modulus::{BarrettModulus, NativeModulus};
@@ -450,7 +450,7 @@ where
 fn measure_output<M>(
     ciphertext: &Ciphertext<u32>,
     expected: u32,
-    secret_key: &[SecretCoefficient<u32>],
+    secret_key: &[i32],
     parameters: &LweParameters<u32, M>,
 ) -> OutputMeasurement
 where
@@ -476,7 +476,7 @@ where
     OutputMeasurement { decoded, noise }
 }
 
-fn encode_secret<M>(coefficient: SecretCoefficient<u32>, modulus: M) -> u32
+fn encode_secret<M>(coefficient: i32, modulus: M) -> u32
 where
     M: RingContext<u32>,
 {
@@ -591,7 +591,7 @@ struct KeyShape {
 }
 
 impl KeyShape {
-    fn from_coefficients(coefficients: &[SecretCoefficient<u32>]) -> Self {
+    fn from_coefficients(coefficients: &[i32]) -> Self {
         let mut shape = Self {
             negative_ones: 0,
             zeros: 0,

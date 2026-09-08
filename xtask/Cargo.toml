@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 primus_fft = { path = "../crates/primus_fft" }
-primus_fhe_core = { path = "../crates/primus_fhe_core" }
+primus_encoding = { path = "../crates/primus_encoding" }
 primus_lattice = { path = "../crates/primus_lattice" }
 primus_lwe = { path = "../crates/primus_lwe" }
 primus_modulus = { path = "../crates/primus_modulus" }

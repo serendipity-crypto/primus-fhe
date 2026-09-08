@@ -4,7 +4,7 @@ use primus_integer::FheUint;
 use primus_reduce::RingContext;
 use rand::distr::Uniform;
 
-use crate::{PlaintextCodec, SecretKeyDistr};
+use crate::{RoundedCodec, SecretKeyDistr};
 
 /// Parameters controlling an LWE key-switching key.
 ///
@@ -82,7 +82,7 @@ where
     /// **LWE** cipher modulus minus one, refers to **q-1** in the paper.
     cipher_modulus_minus_one: T,
     cipher_modulus_uniform_distr: Uniform<T>,
-    plaintext_codec: PlaintextCodec<T>,
+    plaintext_codec: RoundedCodec<T>,
     /// The distribution type of the LWE Secret Key.
     secret_key_distr: SecretKeyDistr,
     secret_key_distribution: Option<DiscreteGaussian<T>>,
@@ -120,7 +120,7 @@ where
 
         let cipher_modulus_uniform_distr = cipher_modulus.uniform_distribution();
         let plaintext_codec =
-            PlaintextCodec::new(plain_modulus_value, cipher_modulus.explicit_value());
+            RoundedCodec::new(plain_modulus_value, cipher_modulus.explicit_value());
 
         Self {
             dimension,
@@ -173,7 +173,7 @@ where
 
     /// Returns the preselected plaintext codec strategy.
     #[inline]
-    pub fn plaintext_codec(&self) -> &PlaintextCodec<T> {
+    pub fn plaintext_codec(&self) -> &RoundedCodec<T> {
         &self.plaintext_codec
     }
 

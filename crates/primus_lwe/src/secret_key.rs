@@ -183,7 +183,7 @@ impl<T: FheUint> LweSecretKey<T> {
         );
         params
             .plaintext_codec()
-            .add_encode_value(ciphertext.b_mut(), message, embedding);
+            .add_encode_value_assign(ciphertext.b_mut(), message, embedding);
 
         ciphertext
     }
@@ -432,7 +432,7 @@ impl<T: FheUint> LweSecretKey<T> {
                 modulus.reduce_sub(b, a_mul_s)
             })
             .collect();
-        params.plaintext_codec().decode_slice_inplace(&mut messages);
+        params.plaintext_codec().decode_slice_assign(&mut messages);
 
         messages
             .into_iter()

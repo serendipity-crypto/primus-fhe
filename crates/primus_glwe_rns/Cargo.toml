@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+primus_encoding = { path = "../primus_encoding", features = ["rns"] }
 primus_data = { path = "../primus_data" }
 primus_decompose = { path = "../primus_decompose" }
 primus_distr = { path = "../primus_distr" }
@@ -50,6 +51,7 @@ harness = false
 [features]
 default = []
 simd = [
+    "primus_encoding/simd",
     "primus_glwe/simd",
     "primus_integer/simd",
     "primus_modulus/simd",

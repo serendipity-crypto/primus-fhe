@@ -265,7 +265,7 @@ where
                 if index == body_index
                     && let Some((message, embedding)) = message
                 {
-                    params.plaintext_codec().add_encode_slice_assign_with_delta(
+                    params.plaintext_codec().add_encode_slice_assign(
                         output.as_mut(),
                         message,
                         embedding,

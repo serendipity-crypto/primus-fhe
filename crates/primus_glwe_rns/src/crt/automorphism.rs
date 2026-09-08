@@ -16,7 +16,7 @@ use primus_reduce::ReduceMul;
 use crate::secret_key::encode_secret_polynomial_to_rns;
 use crate::{
     CrtGlevParameters, CrtGlweCiphertext, DcrtGadgetDomain, DcrtGlweCiphertext, DcrtGlweSecretKey,
-    GlweSecretKey, SecretCoefficient,
+    GlweSecretKey,
 };
 
 /// Reusable workspace for CRT and DCRT automorphism operations.
@@ -159,7 +159,7 @@ where
 
     let mut key = vec![T::ZERO; params.dimension() * dcrt_glev_len];
     let mut auto_si: CrtPolynomial<Vec<T>> = CrtPolynomial::zero(rns_poly_len);
-    let mut auto_signed = vec![SecretCoefficient::<T>::ZERO; poly_length];
+    let mut auto_signed = vec![T::SignedInteger::ZERO; poly_length];
 
     let key_iter = DcrtGlevIterMut::new(key.as_mut_slice(), dcrt_glev_len);
 
@@ -309,8 +309,8 @@ impl<T: FheUint> CrtGlweAutoKey<T> {
 /// Applies a coefficient automorphism to one canonical signed secret
 /// polynomial.
 fn secret_poly_auto_to<T: FheUint>(
-    polynomial: &[SecretCoefficient<T>],
-    output: &mut [SecretCoefficient<T>],
+    polynomial: &[T::SignedInteger],
+    output: &mut [T::SignedInteger],
     auto_helper: &CoeffAutoHelper,
 ) {
     assert_eq!(polynomial.len(), auto_helper.poly_length());

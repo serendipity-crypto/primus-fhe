@@ -1,11 +1,11 @@
+use primus_encoding::PlaintextEmbedding;
 use primus_fft::{FftEngine, FftTable, RustFftTable, TorusFftValue};
-use primus_fhe_core::plaintext::PlaintextEmbedding;
 use primus_integer::FheUint;
 use primus_lattice::ntru::FourierNtruOwned;
 use primus_modulus::{BarrettModulus, NativeModulus};
 use primus_ntru::{
     FourierNtruDecryptContext, FourierNtruEncryptContext, FourierNtruSecretKey, NtruError,
-    NtruParameters, NtruSecretKey, NttNtruSecretKey, SecretCoefficient, SecretKeyDistr,
+    NtruParameters, NtruSecretKey, NttNtruSecretKey, SecretKeyDistr,
 };
 use primus_ntt::{NttTable, PrimitiveRoot, UintNttTable};
 use primus_poly::{FourierPolynomialOwned, Polynomial, PolynomialOwned};
@@ -89,7 +89,7 @@ where
     );
 
     let mut encoded = vec![T::ZERO; POLY_LENGTH];
-    params.plaintext_codec().add_encode_slice_assign_with_delta(
+    params.plaintext_codec().add_encode_slice_assign(
         &mut encoded,
         &messages,
         PlaintextEmbedding::Unsigned,
@@ -198,7 +198,7 @@ where
     );
 
     let mut encoded = vec![T::ZERO; POLY_LENGTH];
-    params.plaintext_codec().add_encode_slice_assign_with_delta(
+    params.plaintext_codec().add_encode_slice_assign(
         &mut encoded,
         &messages,
         PlaintextEmbedding::Unsigned,
@@ -269,7 +269,7 @@ fn fourier_secret_key_roundtrip_and_linear_operations() {
 #[test]
 fn transform_backends_reject_the_zero_key() {
     let zero_key = NtruSecretKey::<u32>::new(
-        vec![SecretCoefficient::<u32>::default(); POLY_LENGTH],
+        vec![i32::default(); POLY_LENGTH],
         SecretKeyDistr::SparseTernary,
     );
 

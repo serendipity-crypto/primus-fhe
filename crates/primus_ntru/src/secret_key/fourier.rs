@@ -1,8 +1,8 @@
 //! Native-torus Fourier NTRU secret key.
 
 use primus_data::{Data, DataMut};
+use primus_encoding::PlaintextEmbedding;
 use primus_fft::{Complex64, FftEngine, FftTable, TorusFftValue};
-use primus_fhe_core::plaintext::PlaintextEmbedding;
 use primus_integer::{FheUint, SignedInteger};
 use primus_lattice::{MAX_POLY_LENGTH, MIN_POLY_LENGTH};
 use primus_modulus::NativeModulus;
@@ -418,7 +418,7 @@ impl FourierNtruSecretKey {
             FourierEncryptionMessage::Zero => {}
             FourierEncryptionMessage::Plaintext { values, embedding } => params
                 .plaintext_codec()
-                .add_encode_slice_assign_with_delta(coefficients, values, embedding),
+                .add_encode_slice_assign(coefficients, values, embedding),
             FourierEncryptionMessage::Encoded(values) => {
                 Polynomial(&mut *coefficients).add_assign(&Polynomial(values), NativeModulus::new())
             }
@@ -486,7 +486,7 @@ impl FourierNtruSecretKey {
         self.phase_to(cipher, result, params, fft, context);
         params
             .plaintext_codec()
-            .decode_slice_inplace(result.as_mut());
+            .decode_slice_assign(result.as_mut());
     }
 
     /// Decrypts and returns the absolute coefficient-wise native-torus error.
@@ -512,7 +512,7 @@ impl FourierNtruSecretKey {
             let decoded = params.plaintext_codec().decode_value(phase_mod_q);
             let encoded = params
                 .plaintext_codec()
-                .encode_value_with_delta(decoded, PlaintextEmbedding::Unsigned);
+                .encode_value(decoded, PlaintextEmbedding::Unsigned);
             *phase = decoded;
             *noise = modulus
                 .reduce_sub(phase_mod_q, encoded)

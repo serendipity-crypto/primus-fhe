@@ -52,7 +52,7 @@ impl<T: FheUint> NtruClientKey<T> {
 
     /// Returns the active binary prefix used as the external LWE key.
     #[inline]
-    pub fn external_lwe_secret_key(&self) -> &[primus_fhe_core::SecretCoefficient<T>] {
+    pub fn external_lwe_secret_key(&self) -> &[T::SignedInteger] {
         &self.client_ntru_secret_key.as_slice()[..self.external_lwe_dimension]
     }
 
@@ -93,7 +93,7 @@ impl<T: FheUint> NtruClientKey<T> {
         }
         if self.client_ntru_secret_key.as_slice()[self.external_lwe_dimension..]
             .iter()
-            .any(|&coefficient| coefficient != primus_fhe_core::SecretCoefficient::<T>::ZERO)
+            .any(|&coefficient| coefficient != T::SignedInteger::ZERO)
         {
             return Err(NtruKeyError::ClientSecretKeyPaddingMismatch);
         }

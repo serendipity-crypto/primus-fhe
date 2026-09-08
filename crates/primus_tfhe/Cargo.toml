@@ -7,7 +7,7 @@ edition = "2024"
 primus_integer = { path = "../primus_integer" }
 primus_reduce = { path = "../primus_reduce" }
 primus_poly = { path = "../primus_poly" }
-primus_fhe_core = { path = "../primus_fhe_core" }
+primus_encoding = { path = "../primus_encoding" }
 primus_lwe = { path = "../primus_lwe" }
 
 thiserror = { workspace = true }
@@ -15,7 +15,7 @@ thiserror = { workspace = true }
 [features]
 default = []
 simd = [
-    "primus_fhe_core/simd",
+    "primus_encoding/simd",
     "primus_integer/simd",
     "primus_lwe/simd",
 ]

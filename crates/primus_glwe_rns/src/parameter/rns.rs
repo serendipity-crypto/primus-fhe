@@ -9,7 +9,7 @@ use primus_reduce::FieldContext;
 use primus_rns::{RNSBase, ResidueFactors, Residues};
 use rand::distr::Uniform;
 
-use crate::{RnsCoeffCodec, SecretKeyDistr};
+use crate::{BfvRnsCodec, SecretKeyDistr};
 
 use super::CrtGlevParametersError;
 
@@ -28,7 +28,7 @@ where
     /// The uniform distribution to sample values over `Q1`, `Q2` ...
     cipher_moduli_uniform_distr: Vec<Uniform<T>>,
     /// BFV-style RNS codec for encoding/decoding plaintext.
-    codec: RnsCoeffCodec<T, M>,
+    codec: BfvRnsCodec<T, M>,
     delta_mod_q: Vec<T>,
     /// The distribution type of the secret key.
     secret_key_distr: SecretKeyDistr,
@@ -63,7 +63,7 @@ where
             temp
         };
 
-        let codec = RnsCoeffCodec::new(plain_modulus, base_q, gamma_modulus);
+        let codec = BfvRnsCodec::new(plain_modulus, base_q, gamma_modulus);
 
         let delta_mod_q: Vec<T> = codec
             .delta_factor_mod_q()
@@ -207,7 +207,7 @@ where
     }
 
     /// Returns the plaintext coefficient codec bound to this RNS basis.
-    pub fn codec(&self) -> &RnsCoeffCodec<T, M> {
+    pub fn codec(&self) -> &BfvRnsCodec<T, M> {
         &self.codec
     }
 

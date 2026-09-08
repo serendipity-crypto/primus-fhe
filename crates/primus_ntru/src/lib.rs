@@ -19,7 +19,7 @@ pub use ciphertext::{
 pub use error::NtruError;
 pub use key_switch::{FourierNtruKeySwitchingKey, NttNtruKeySwitchingKey};
 pub use parameter::{NlevParameters, NtruParameters};
-pub use primus_fhe_core::{SecretCoefficient, SecretKeyDistr};
+pub use primus_distr::SecretKeyDistr;
 pub use primus_lattice::context::{
     FourierNtruExternalProductContext, NttNtruExternalProductContext,
 };

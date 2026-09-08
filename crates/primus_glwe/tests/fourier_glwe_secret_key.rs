@@ -1,5 +1,5 @@
+use primus_encoding::PlaintextEmbedding;
 use primus_fft::{FftEngine, FftTable, RustFftTable, TorusFftValue};
-use primus_fhe_core::plaintext::PlaintextEmbedding;
 use primus_glwe::{
     FourierGlweDecryptContext, FourierGlweEncryptContext, FourierGlweSecretKey, GlweParameters,
     SecretKeyDistr,
@@ -88,7 +88,7 @@ where
         );
 
         let mut encoded = vec![T::ZERO; POLY_LENGTH];
-        params.plaintext_codec().add_encode_slice_assign_with_delta(
+        params.plaintext_codec().add_encode_slice_assign(
             &mut encoded,
             &messages,
             PlaintextEmbedding::Unsigned,
