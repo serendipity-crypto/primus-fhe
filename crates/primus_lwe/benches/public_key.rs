@@ -1,44 +1,81 @@
 // cargo bench -p primus_lwe --bench public_key
 // These are performance fixtures, not evaluated security parameters.
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use primus_lwe::{LweCiphertext, LweParameters, LwePublicKey, LweSecretKey, SecretKeyDistr};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use primus_lattice::lwe::LweIterMut;
+use primus_lwe::{LweParameters, LwePublicKey, LweSecretKey, SecretKeyDistr};
 use primus_modulus::{BarrettModulus, NativeModulus};
 use primus_reduce::RingContext;
 use rand::{SeedableRng, rngs::StdRng};
 use std::hint::black_box;
 
-fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) {
-    for dimension in [512, 1024] {
-        let mut rng = StdRng::seed_from_u64(0x1_ee15);
+// One dimension tracks key-generation cost; encryption below covers both
+// key sizes without repeating generation measurements at every batch count.
+fn bench_generation<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) {
+    let dimension = 1024;
+    let mut rng = StdRng::seed_from_u64(0x1_ee15);
+    let params = LweParameters::new(dimension, 4, modulus, SecretKeyDistr::UniformBinary, 3.2);
+    let secret = LweSecretKey::generate(&params, &mut rng);
+    let mut group = c.benchmark_group(format!("lwe_public_key/u32/{name}/n{dimension}"));
+    // Includes the owned key allocation and all n zero encryptions.
+    group.bench_function("generate", |b| {
+        b.iter(|| LwePublicKey::generate(black_box(&secret), black_box(&params), &mut rng))
+    });
+    group.finish();
+}
+
+fn bench_batch_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) {
+    for (dimension, count) in [(512, 1), (512, 64), (1024, 64)] {
+        let mut rng = StdRng::seed_from_u64(0x1_ee25);
         let params = LweParameters::new(dimension, 4, modulus, SecretKeyDistr::UniformBinary, 3.2);
         let secret = LweSecretKey::generate(&params, &mut rng);
-        let key = LwePublicKey::generate(&secret, &params, &mut rng);
-        let mut output = LweCiphertext::zero(dimension);
-        let mut group = c.benchmark_group(format!("lwe_public_key/u32/{name}/n{dimension}"));
-        // Includes the owned key allocation and all n zero encryptions.
-        group.bench_function("generate", |b| {
-            b.iter(|| LwePublicKey::generate(black_box(&secret), black_box(&params), &mut rng))
-        });
-        // Reuses the complete public key and output, including fresh sampling
-        // each iteration; matrix generation and allocation are outside timing.
-        group.bench_function("encrypt_to", |b| {
+        let public = LwePublicKey::generate(&secret, &params, &mut rng);
+        let messages = vec![1u32; count];
+        let mut output = vec![0u32; (dimension + 1) * count];
+        let mut group = c.benchmark_group(format!(
+            "lwe_public_key/u32/{name}/n{dimension}/count{count}"
+        ));
+        group.throughput(Throughput::Elements(count as u64));
+        // One iteration encrypts exactly count independent messages; both cases
+        // reuse identical output/key storage and include fresh random sampling.
+        group.bench_function("single_loop", |b| {
             b.iter(|| {
-                key.encrypt_to(
-                    black_box(1u32),
-                    black_box(&mut output),
-                    black_box(&params),
-                    &mut rng,
-                )
+                for (&message, mut ciphertext) in black_box(&messages)
+                    .iter()
+                    .zip(LweIterMut::new(black_box(&mut output), dimension + 1))
+                {
+                    black_box(&public).encrypt_to(
+                        message,
+                        &mut ciphertext,
+                        black_box(&params),
+                        &mut rng,
+                    );
+                }
             })
         });
+        // Count one records single-message latency. Larger counts compare
+        // row reuse against the same number of independent encryptions.
+        if count > 1 {
+            group.bench_function("batch_to", |b| {
+                b.iter(|| {
+                    black_box(&public).encrypt_batch_to(
+                        black_box(&messages),
+                        black_box(&mut output),
+                        black_box(&params),
+                        &mut rng,
+                    );
+                })
+            });
+        }
         group.finish();
     }
 }
 
 fn public_key(c: &mut Criterion) {
-    bench_domain(c, "native", NativeModulus::new());
-    bench_domain(c, "explicit", BarrettModulus::new(132_120_577));
+    bench_generation(c, "native", NativeModulus::new());
+    bench_generation(c, "explicit", BarrettModulus::new(132_120_577));
+    bench_batch_domain(c, "native", NativeModulus::new());
+    bench_batch_domain(c, "explicit", BarrettModulus::new(132_120_577));
 }
 
 criterion_group!(benches, public_key);

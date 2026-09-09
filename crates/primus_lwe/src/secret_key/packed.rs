@@ -33,31 +33,6 @@ impl<T: FheUint> LweSecretKey<T> {
         )
     }
 
-    /// Encrypts at most `params.dimension()` messages with centered embedding.
-    ///
-    /// Inputs remain canonical residues in `[0,t)`; `t - 1` represents `-1`.
-    /// See [`Self::encrypt_multi_messages_with_embedding`] for the layout,
-    /// correctness and panic conditions.
-    #[inline]
-    pub fn encrypt_multi_messages_centered<R, M, Msg>(
-        &self,
-        messages: &[Msg],
-        params: &LweParameters<T, M>,
-        rng: &mut R,
-    ) -> MultiMsgLweCiphertext<T>
-    where
-        Msg: Copy + TryInto<T>,
-        R: rand::Rng + rand::CryptoRng,
-        M: RingContext<T>,
-    {
-        self.encrypt_multi_messages_with_embedding(
-            messages,
-            params,
-            rng,
-            PlaintextEmbedding::Centered,
-        )
-    }
-
     /// Encrypts multiple messages using the selected plaintext embedding.
     ///
     /// Stores a length-`n` mask followed by `messages.len()` bodies, where

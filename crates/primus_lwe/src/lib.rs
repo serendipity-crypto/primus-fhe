@@ -29,12 +29,23 @@
 //! Empty batches consume no randomness. Batch sampling order need not match
 //! repeated single-message calls; public-key batching reuses rows across a small
 //! output tile. The separate packed multi-message methods retain their shared-mask layout.
-
 //!
 //! [`LweKeySwitchingKey::key_switch_batch_to`] uses the same contiguous layout,
 //! with separate input/output dimensions. It reuses each key entry across a small
 //! tile, needs no heap scratch, and produces exactly the same coefficients as
 //! repeated single-ciphertext key switching.
+//!
+//! | Input / result | Single ciphertext | Independent batch |
+//! |---|---|---|
+//! | Message, unsigned embedding | `encrypt` / `encrypt_to` | `encrypt_batch` / `encrypt_batch_to` |
+//! | Message, selected embedding | `encrypt_with_embedding` / `encrypt_with_embedding_to` | `encrypt_batch_with_embedding` / `encrypt_batch_with_embedding_to` |
+//! | Encoded residue | `encrypt_encoded` / `encrypt_encoded_to` | `encrypt_encoded_batch` / `encrypt_encoded_batch_to` |
+//! | Decoded message | `decrypt` | `decrypt_batch` / `decrypt_batch_to` |
+//! | Noisy phase | `decrypt_phase` | `decrypt_phase_batch` / `decrypt_phase_batch_to` |
+//!
+//! Select centered encryption with [`primus_encoding::PlaintextEmbedding::Centered`].
+//! [`LweSecretKey::decrypt_with_noise`] also takes an explicit embedding to
+//! measure circular distance from the decoded message's encoding.
 
 #![deny(missing_docs)]
 

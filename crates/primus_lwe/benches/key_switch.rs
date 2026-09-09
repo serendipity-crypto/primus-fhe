@@ -1,9 +1,9 @@
 // cargo bench -p primus_lwe --bench key_switch
-// Performance fixtures, not evaluated security parameters. See key_switch_results.md.
+// Performance fixtures, not evaluated security parameters.
 
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use primus_decompose::primitive::ApproxSignedBasis;
 use primus_lattice::lwe::{LweIter, LweIterMut};
 use primus_lwe::{
@@ -49,15 +49,19 @@ fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) 
                     }
                 })
             });
-            group.bench_function("batch_to", |b| {
-                b.iter(|| {
-                    black_box(&key).key_switch_batch_to(
-                        black_box(input),
-                        black_box(&mut output),
-                        black_box(modulus),
-                    );
-                })
-            });
+            // The one-element batch delegates to the single kernel. Compare
+            // blocked and independent processing only where entries are reused.
+            if count > 1 {
+                group.bench_function("batch_to", |b| {
+                    b.iter(|| {
+                        black_box(&key).key_switch_batch_to(
+                            black_box(input),
+                            black_box(&mut output),
+                            black_box(modulus),
+                        );
+                    })
+                });
+            }
             group.finish();
         }
     }
@@ -86,20 +90,20 @@ fn bench_generation(c: &mut Criterion) {
     let mut group = c.benchmark_group("lwe_key_switch_generation/u32/explicit");
     group.sample_size(10);
 
-    for input_dimension in [1024, 2048] {
-        let input_secret_key = vec![1u32; input_dimension];
-        group.bench_function(BenchmarkId::new("generate", input_dimension), |bencher| {
-            bencher.iter(|| {
-                LweKeySwitchingKey::generate(
-                    LweSecretKeyRef::Encoded(black_box(&input_secret_key)),
-                    &output_secret_key,
-                    &output_parameters,
-                    basis.clone(),
-                    &mut rng,
-                )
-            });
+    // One representative size tracks generation; applying the key above
+    // already separates modulus and decomposition-kernel costs.
+    let input_secret_key = [1u32; 1024];
+    group.bench_function("generate_n1024_to_n800", |bencher| {
+        bencher.iter(|| {
+            LweKeySwitchingKey::generate(
+                LweSecretKeyRef::Encoded(black_box(&input_secret_key)),
+                &output_secret_key,
+                &output_parameters,
+                basis.clone(),
+                &mut rng,
+            )
         });
-    }
+    });
     group.finish();
 }
 

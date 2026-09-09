@@ -194,7 +194,7 @@ impl<T: FheUint> LwePublicKey<T> {
         R: rand::Rng + rand::CryptoRng,
     {
         // At u32 dimensions 512/1024, 8 outperformed 4, while 16 lost cache
-        // locality at 1024. Keep this internal; remeasure with benches/batch.rs.
+        // locality at 1024. Keep this internal; remeasure with benches/public_key.rs.
         const TILE_COUNT: usize = 8;
         let row_len = self.dimension + 1;
         // Clamp before multiplication: even enormous dimensions cannot overflow

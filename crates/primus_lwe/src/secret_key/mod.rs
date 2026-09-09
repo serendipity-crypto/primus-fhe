@@ -4,6 +4,7 @@ mod batch;
 mod borrowed;
 mod owned;
 mod packed;
+mod single;
 
 pub use borrowed::LweSecretKeyRef;
 pub use owned::LweSecretKey;

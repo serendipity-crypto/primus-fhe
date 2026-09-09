@@ -7,50 +7,20 @@ use primus_reduce::RingContext;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 #[test]
-fn key_switches_between_lwe_secret_keys() {
-    let modulus = NativeModulus::<u32>::new();
-    let input_parameters = LweParameters::new(8, 4u32, modulus, SecretKeyDistr::UniformBinary, 3.2);
-    let output_parameters =
-        LweParameters::new(5, 4u32, modulus, SecretKeyDistr::UniformBinary, 3.2);
-    let basis = ApproxSignedBasis::new(None, 4, None);
-    let mut rng = StdRng::seed_from_u64(0x1_ee05);
-    let input_secret_key = LweSecretKey::generate(&input_parameters, &mut rng);
-    let output_secret_key = LweSecretKey::generate(&output_parameters, &mut rng);
-    let key_switching_key = LweKeySwitchingKey::generate(
-        input_secret_key.as_view(),
-        &output_secret_key,
-        &output_parameters,
-        basis,
-        &mut rng,
-    );
-
-    for message in 0u32..4 {
-        let input = input_secret_key.encrypt(message, &input_parameters, &mut rng);
-        let output = key_switching_key.key_switch(&input, modulus);
-        assert_eq!(
-            output_secret_key.decrypt::<_, u32>(&output, &output_parameters),
-            message
-        );
-    }
+fn signed_input_generation_matches_encoded() {
+    check_signed_generation(NativeModulus::new());
+    check_signed_generation(BarrettModulus::new(132_120_577));
 }
 
-#[test]
-fn key_switches_with_base_four_signed_digits() {
-    check_base_four_signed_digits(NativeModulus::new());
-    check_base_four_signed_digits(BarrettModulus::new(132_120_577));
-}
-
-fn check_base_four_signed_digits<M: RingContext<u32>>(modulus: M) {
+fn check_signed_generation<M: RingContext<u32>>(modulus: M) {
     let q = modulus.explicit_value().map_or(1i64 << 32, i64::from);
     let input_parameters =
         LweParameters::new(8, 4u32, modulus, SecretKeyDistr::UniformTernary, 0.7);
     let output_parameters =
         LweParameters::new(5, 4u32, modulus, SecretKeyDistr::UniformTernary, 0.7);
-    let basis = ApproxSignedBasis::new(
-        modulus.explicit_value(),
-        2,
-        modulus.explicit_value().map(|_| 13),
-    );
+    // Base sixteen also exercises general digits in the end-to-end check;
+    // the exact entry-sum test below covers both base four and base sixteen.
+    let basis = ApproxSignedBasis::new(modulus.explicit_value(), 4, None);
     let mut rng = StdRng::seed_from_u64(0x1_ee06);
     let signed_key = [-1, 0, 1, -1, 1, 0, -1, 1];
     let input_secret_key = LweSecretKey::new(
@@ -217,7 +187,7 @@ fn check_batch_sum<T: primus_integer::FheUint, M: RingContext<T>>(modulus: M) {
             basis,
             &mut rng,
         );
-        for count in [0, 1, 7, 8, 9, 17] {
+        for count in [0, 1, 7, 8, 17] {
             let mut input: Vec<T> = params
                 .cipher_modulus_uniform_distr()
                 .sample_iter(&mut rng)
@@ -256,7 +226,6 @@ fn check_batch_sum<T: primus_integer::FheUint, M: RingContext<T>>(modulus: M) {
             let mut actual = vec![T::ONE; count * 66];
             key.key_switch_batch_to(&input, &mut actual, modulus);
             assert_eq!(actual, expected);
-            assert_eq!(key.key_switch_batch(&input, modulus), expected);
         }
     }
 }

@@ -1,6 +1,6 @@
 use primus_integer::{AsFrom, AsInto, FheUint};
 use primus_lattice::lwe::Lwe;
-use primus_lwe::{LweParameters, LweSecretKey, LweSecretKeyRef, SecretKeyDistr};
+use primus_lwe::{LweParameters, LweSecretKeyRef, SecretKeyDistr};
 use primus_modulus::{BarrettModulus, NativeModulus, PowOf2Modulus};
 use primus_reduce::RingContext;
 use rand::{Rng, SeedableRng, distr::Distribution, rngs::StdRng};
@@ -98,37 +98,6 @@ fn raw_encryption_and_phase_agree_across_key_representations() {
     check_raw(PowOf2Modulus::new(1u64 << 50));
     check_raw(BarrettModulus::new(132_120_577u32));
     check_raw(BarrettModulus::new(1_125_899_906_826_241u64));
-}
-
-#[test]
-fn message_encryption_reuses_storage_for_both_embeddings() {
-    let params = LweParameters::new(
-        7,
-        4,
-        BarrettModulus::new(97u32),
-        SecretKeyDistr::UniformTernary,
-        0.7,
-    );
-    let mut rng = StdRng::seed_from_u64(0x1_ee06);
-    let key = LweSecretKey::generate(&params, &mut rng);
-    let mut storage = [u32::MAX; 8];
-    for message in 0..4u32 {
-        for centered in [false, true] {
-            let mut rng = StdRng::seed_from_u64(0x1_ee06);
-            let mut expected_rng = StdRng::seed_from_u64(0x1_ee06);
-            let mut output = Lwe::new(&mut storage[..]);
-            let expected = if centered {
-                key.encrypt_centered_to(message, &mut output, &params, &mut rng);
-                key.encrypt_centered(message, &params, &mut expected_rng)
-            } else {
-                key.encrypt_to(message, &mut output, &params, &mut rng);
-                key.encrypt(message, &params, &mut expected_rng)
-            };
-            assert_eq!(output.0, expected.0.as_slice());
-            let input = Lwe::new(&storage[..]);
-            assert_eq!(key.decrypt::<_, u32>(&input, &params), message);
-        }
-    }
 }
 
 #[test]

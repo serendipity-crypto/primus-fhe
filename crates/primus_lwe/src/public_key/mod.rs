@@ -213,43 +213,6 @@ impl<T: FheUint> LwePublicKey<T> {
         self.encrypt_with_embedding_to(message, output, params, rng, PlaintextEmbedding::Unsigned);
     }
 
-    /// Encrypts a canonical message in `[0,t)` with centered embedding.
-    ///
-    /// See [`Self::encrypt_with_embedding`] for correctness and panic conditions.
-    #[must_use]
-    #[inline]
-    pub fn encrypt_centered<R, M, Msg>(
-        &self,
-        message: Msg,
-        params: &LweParameters<T, M>,
-        rng: &mut R,
-    ) -> LweCiphertext<T>
-    where
-        Msg: TryInto<T>,
-        R: rand::Rng + rand::CryptoRng,
-        M: RingContext<T>,
-    {
-        self.encrypt_with_embedding(message, params, rng, PlaintextEmbedding::Centered)
-    }
-
-    /// Overwrites existing storage using centered message embedding.
-    ///
-    /// See [`Self::encrypt_with_embedding_to`] for correctness and panic conditions.
-    #[inline]
-    pub fn encrypt_centered_to<R, M, Msg>(
-        &self,
-        message: Msg,
-        output: &mut Lwe<impl DataMut<Elem = T>>,
-        params: &LweParameters<T, M>,
-        rng: &mut R,
-    ) where
-        Msg: TryInto<T>,
-        R: rand::Rng + rand::CryptoRng,
-        M: RingContext<T>,
-    {
-        self.encrypt_with_embedding_to(message, output, params, rng, PlaintextEmbedding::Centered);
-    }
-
     /// Encodes a canonical message, then encrypts the encoded residue.
     ///
     /// Both embeddings accept unsigned residues in `[0,t)`; under centered

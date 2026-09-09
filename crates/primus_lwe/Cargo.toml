@@ -21,7 +21,7 @@ primus_modulus = { path = "../primus_modulus" }
 criterion = { workspace = true }
 
 [[bench]]
-name = "lwe_enc"
+name = "secret_key"
 harness = false
 
 [[bench]]
@@ -30,10 +30,6 @@ harness = false
 
 [[bench]]
 name = "public_key"
-harness = false
-
-[[bench]]
-name = "batch"
 harness = false
 
 [features]

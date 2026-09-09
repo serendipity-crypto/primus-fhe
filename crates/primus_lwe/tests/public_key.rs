@@ -1,4 +1,5 @@
 use primus_decompose::primitive::ApproxSignedBasis;
+use primus_encoding::PlaintextEmbedding;
 use primus_integer::FheUint;
 use primus_lattice::lwe::Lwe;
 use primus_lwe::{LweKeySwitchingKey, LweParameters, LwePublicKey, LweSecretKey, SecretKeyDistr};
@@ -163,16 +164,13 @@ fn check_messages<M: RingContext<u32>>(modulus: M) {
         for centered in [false, true] {
             let seed = rng.next_u64();
             let mut rng = StdRng::seed_from_u64(seed);
-            let mut allocating_rng = StdRng::seed_from_u64(seed);
             let mut output = Lwe::new(&mut storage[..]);
-            let allocated = if centered {
-                key.encrypt_centered_to(message, &mut output, &params, &mut rng);
-                key.encrypt_centered(message, &params, &mut allocating_rng)
+            let embedding = if centered {
+                PlaintextEmbedding::Centered
             } else {
-                key.encrypt_to(message, &mut output, &params, &mut rng);
-                key.encrypt(message, &params, &mut allocating_rng)
+                PlaintextEmbedding::Unsigned
             };
-            assert_eq!(output.as_ref(), allocated.as_ref());
+            key.encrypt_with_embedding_to(message, &mut output, &params, &mut rng, embedding);
             assert_eq!(secret.decrypt::<_, u32>(&output, &params), message);
             let switched = switching.key_switch(&output, modulus);
             assert_eq!(

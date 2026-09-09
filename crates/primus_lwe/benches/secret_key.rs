@@ -1,4 +1,6 @@
-// cargo bench -p primus_lwe --bench lwe_enc
+// cargo bench -p primus_lwe --bench secret_key
+// Retain separate allocating/in-place kernels, encoded/signed dot products,
+// and the packed rotated-dot kernel; sampler/codec microbenchmarks live below LWE.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use primus_lwe::{LweCiphertext, LweParameters, LweSecretKey, LweSecretKeyRef, SecretKeyDistr};
@@ -30,18 +32,6 @@ fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) 
     });
     group.bench_function("decrypt", |b| {
         b.iter(|| black_box(sk.decrypt::<_, u32>(black_box(&cipher), black_box(&params))))
-    });
-    group.bench_function("signed_encrypt_encoded_allocating", |b| {
-        b.iter(|| {
-            let params = black_box(&params);
-            LweSecretKeyRef::Signed(black_box(&signed)).encrypt_encoded(
-                black_box(encoded),
-                params.cipher_modulus(),
-                params.cipher_modulus_uniform_distr(),
-                params.noise_distribution(),
-                &mut rng,
-            )
-        })
     });
     group.bench_function("signed_phase", |b| {
         b.iter(|| {
@@ -80,14 +70,11 @@ fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) 
     group.bench_function("packed_messages_allocating", |b| {
         b.iter(|| sk.encrypt_multi_messages(black_box(&messages), black_box(&params), &mut rng))
     });
-    group.bench_function("packed_zeros_allocating", |b| {
-        b.iter(|| sk.encrypt_multi_zeros(black_box(dimension), black_box(&params), &mut rng))
-    });
     group.finish();
 }
-fn bench_encrypt(c: &mut Criterion) {
+fn secret_key(c: &mut Criterion) {
     bench_domain(c, "native", NativeModulus::new());
     bench_domain(c, "explicit", BarrettModulus::new(132_120_577));
 }
-criterion_group!(benches, bench_encrypt);
+criterion_group!(benches, secret_key);
 criterion_main!(benches);
