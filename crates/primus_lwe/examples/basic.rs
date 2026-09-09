@@ -3,6 +3,7 @@
 //! Run with `cargo run -p primus_lwe --example basic`.
 //! The small dimension keeps the example fast and is not a security recommendation.
 
+use primus_lattice::lwe::Lwe;
 use primus_lwe::{LweParameters, LweSecretKey, SecretKeyDistr};
 use primus_modulus::NativeModulus;
 
@@ -25,4 +26,10 @@ fn main() {
     let decrypted: u32 = secret_key.decrypt(&ciphertext, &parameters);
 
     assert_eq!(decrypted, message);
+
+    // Reuse caller-owned storage; decryption accepts the borrowed ciphertext too.
+    let mut storage = [0u32; LWE_DIMENSION + 1];
+    let mut output = Lwe::new(&mut storage[..]);
+    secret_key.encrypt_to(message, &mut output, &parameters, &mut rng);
+    assert_eq!(secret_key.decrypt::<_, u32>(&output, &parameters), message);
 }

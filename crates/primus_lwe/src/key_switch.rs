@@ -1,23 +1,12 @@
-use num_traits::Signed;
 use primus_data::{Data, DataMut};
 use primus_decompose::primitive::ApproxSignedBasis;
 use primus_integer::{FheUint, SignedInteger};
 use primus_lattice::lwe::Lwe;
 use primus_reduce::RingContext;
 
-use crate::{LweKeySwitchingParameters, LweParameters, LweSecretKey};
+use crate::secret_key::encode_signed;
 
-#[inline]
-fn encode_secret_coefficient<T: FheUint>(coefficient: T::SignedInteger, modulus: T) -> T {
-    if coefficient.is_negative() {
-        debug_assert!(coefficient.unsigned_abs() < modulus);
-        modulus.wrapping_add_signed(coefficient)
-    } else {
-        let coefficient = coefficient.cast_to_unsigned();
-        debug_assert!(coefficient < modulus);
-        coefficient
-    }
-}
+use crate::{LweParameters, LweSecretKey, LweSecretKeyRef};
 
 /// An LWE key-switching key from one secret-key vector to another.
 ///
@@ -33,115 +22,111 @@ pub struct LweKeySwitchingKey<T: FheUint> {
 
 impl<T: FheUint> LweKeySwitchingKey<T> {
     /// Generates a key switching from `input_secret_key` to
-    /// `output_secret_key`.
+    /// `output_secret_key`. The output key uses encoded storage so entry
+    /// encryption retains the modulus backend's slice dot-product kernel.
+    /// Dimensions are taken from the keys; the generated key takes ownership of `basis`.
+    ///
+    /// # Correctness
+    ///
+    /// Encoded coefficients of either key must be canonical residues
+    /// under the ciphertext modulus in `output_parameters`, satisfying
+    /// [`primus_reduce::ReduceDotProduct`] and [`primus_reduce::ReduceMul`].
+    /// Signed input coefficients must satisfy `-q < coefficient < q` for an
+    /// explicit modulus `q`; every signed value is valid for the native modulus.
+    /// These coefficient ranges are not checked in release builds. The input
+    /// ciphertexts must use the same modulus; this operation does not switch moduli.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input key is empty, the output key dimension differs from
+    /// the nonzero output parameter dimension, the basis modulus differs from
+    /// the output modulus, or the key storage length overflows.
     pub fn generate<R, M>(
-        input_secret_key: &[T],
+        input_secret_key: LweSecretKeyRef<'_, T>,
         output_secret_key: &LweSecretKey<T>,
         output_parameters: &LweParameters<T, M>,
-        parameters: &LweKeySwitchingParameters<T>,
+        basis: ApproxSignedBasis<T>,
         rng: &mut R,
     ) -> Self
     where
         R: rand::Rng + rand::CryptoRng,
         M: RingContext<T>,
     {
-        Self::generate_from_residues(
-            input_secret_key.iter().copied(),
-            input_secret_key.len(),
-            output_secret_key,
-            output_parameters,
-            parameters,
-            rng,
-        )
-    }
-
-    /// Generates a key switching from canonical signed input coefficients.
-    pub fn generate_from_signed<R, M>(
-        input_secret_key: &[T::SignedInteger],
-        output_secret_key: &LweSecretKey<T>,
-        output_parameters: &LweParameters<T, M>,
-        parameters: &LweKeySwitchingParameters<T>,
-        rng: &mut R,
-    ) -> Self
-    where
-        R: rand::Rng + rand::CryptoRng,
-        M: RingContext<T>,
-    {
-        let modulus = output_parameters.cipher_modulus();
-        Self::generate_from_residues(
-            input_secret_key.iter().copied().map(|coefficient| {
-                if let Some(modulus) = modulus.explicit_value() {
-                    encode_secret_coefficient(coefficient, modulus)
-                } else {
-                    coefficient.cast_to_unsigned()
-                }
-            }),
-            input_secret_key.len(),
-            output_secret_key,
-            output_parameters,
-            parameters,
-            rng,
-        )
-    }
-
-    fn generate_from_residues<R, M>(
-        input_secret_key: impl IntoIterator<Item = T>,
-        input_dimension: usize,
-        output_secret_key: &LweSecretKey<T>,
-        output_parameters: &LweParameters<T, M>,
-        parameters: &LweKeySwitchingParameters<T>,
-        rng: &mut R,
-    ) -> Self
-    where
-        R: rand::Rng + rand::CryptoRng,
-        M: RingContext<T>,
-    {
-        assert_eq!(input_dimension, parameters.input_dimension());
-        assert_eq!(output_secret_key.dimension(), parameters.output_dimension());
-        assert_eq!(output_parameters.dimension(), parameters.output_dimension());
+        let input_dimension = input_secret_key.dimension();
+        let output_dimension = output_secret_key.dimension();
+        assert!(input_dimension != 0, "input LWE dimension must be non-zero");
         assert_eq!(
-            parameters.basis().modulus(),
+            output_dimension,
+            output_parameters.dimension(),
+            "output LWE key dimension mismatch"
+        );
+        assert_eq!(
+            basis.modulus(),
             output_parameters.cipher_modulus().explicit_value(),
             "LWE key switching currently requires matching input and output ciphertext moduli"
         );
 
-        let output_lwe_len = parameters
-            .output_dimension()
+        let output_lwe_len = output_dimension
             .checked_add(1)
             .expect("LWE key-switching output length overflow");
-        let entry_count = parameters
-            .input_dimension()
-            .checked_mul(parameters.decompose_length())
-            .expect("LWE key-switching entry count overflow");
-        let mut data = Vec::with_capacity(
-            entry_count
-                .checked_mul(output_lwe_len)
-                .expect("LWE key-switching key length overflow"),
-        );
+        let coefficient_len = output_lwe_len
+            .checked_mul(basis.decompose_length())
+            .expect("LWE key-switching coefficient block length overflow");
+        let length = input_dimension
+            .checked_mul(coefficient_len)
+            .expect("LWE key-switching key length overflow");
+        let mut data = vec![T::ZERO; length];
 
         let modulus = output_parameters.cipher_modulus();
         let uniform = output_parameters.cipher_modulus_uniform_distr();
         let gaussian = output_parameters.noise_distribution();
-        for secret in input_secret_key {
-            for scalar in parameters.basis().scalar_iter() {
-                let mut ciphertext = Lwe::generate_random_zero_sample(
-                    output_secret_key.as_ref(),
+        let output_key = output_secret_key.as_view();
+        // Each coefficient owns a contiguous block of decomposition-level entries.
+        let blocks = data.chunks_exact_mut(coefficient_len);
+        let encrypt_levels = |(secret, block): (T, &mut [T])| {
+            for (scalar, entry) in basis
+                .scalar_iter()
+                .zip(block.chunks_exact_mut(output_lwe_len))
+            {
+                let plaintext = modulus.reduce_mul(secret, scalar);
+                output_key.encrypt_encoded_to(
+                    plaintext,
+                    &mut Lwe::new(entry),
                     modulus,
                     uniform,
                     gaussian,
                     rng,
                 );
-                let message = modulus.reduce_mul(secret, scalar);
-                modulus.reduce_add_assign(ciphertext.b_mut(), message);
-                data.extend_from_slice(&ciphertext.0);
             }
+        };
+        // Select representation and modulus shape once, outside both loops.
+        match input_secret_key {
+            LweSecretKeyRef::Encoded(coefficients) => coefficients
+                .iter()
+                .copied()
+                .zip(blocks)
+                .for_each(encrypt_levels),
+            LweSecretKeyRef::Signed(coefficients) => match modulus.explicit_value() {
+                Some(q) => coefficients
+                    .iter()
+                    .copied()
+                    .map(|coefficient| encode_signed(coefficient, q))
+                    .zip(blocks)
+                    .for_each(encrypt_levels),
+                None => coefficients
+                    .iter()
+                    .copied()
+                    .map(SignedInteger::cast_to_unsigned)
+                    .zip(blocks)
+                    .for_each(encrypt_levels),
+            },
         }
 
         Self {
             data,
-            input_dimension: parameters.input_dimension(),
-            output_dimension: parameters.output_dimension(),
-            basis: parameters.basis().clone(),
+            input_dimension,
+            output_dimension,
+            basis,
         }
     }
 
@@ -169,30 +154,66 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
         &self.data
     }
 
-    /// Key-switches `input` into `output`.
+    /// Key-switches `input`, overwriting all of `output` without allocating.
+    ///
+    /// # Correctness
+    ///
+    /// `input` must have canonical coefficients under the modulus used to
+    /// generate this key. Decomposition approximates its mask coefficients;
+    /// the resulting phase error includes both decomposition error weighted
+    /// by the input secret and the accumulated key-entry noise. Parameters
+    /// must leave sufficient decoding margin for the intended operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either ciphertext lacks a body, its dimension differs from
+    /// this key, or `modulus` differs from the basis modulus. Validating these
+    /// conditions does not modify `output`.
     pub fn key_switch_to<M, A, B>(&self, input: &Lwe<A>, output: &mut Lwe<B>, modulus: M)
     where
         M: RingContext<T>,
         A: Data<Elem = T>,
         B: DataMut<Elem = T>,
     {
-        assert_eq!(input.dimension(), self.input_dimension);
-        assert_eq!(output.dimension(), self.output_dimension);
-        assert_eq!(self.basis.modulus(), modulus.explicit_value());
+        let basis = &self.basis;
+        let (input_mask, input_body) = input.a_b();
+        let (output_mask, output_body) = output.a_b_mut();
+        assert_eq!(
+            input_mask.len(),
+            self.input_dimension,
+            "input LWE ciphertext dimension mismatch"
+        );
+        assert_eq!(
+            output_mask.len(),
+            self.output_dimension,
+            "output LWE ciphertext dimension mismatch"
+        );
+        assert_eq!(
+            basis.modulus(),
+            modulus.explicit_value(),
+            "LWE key-switching modulus mismatch"
+        );
 
-        output.set_zero();
-        *output.b_mut() = modulus.reduce_neg(input.b());
+        // Accumulate -b + sum(digit * key_entry), then negate the result.
+        output_mask.fill(T::ZERO);
+        *output_body = modulus.reduce_neg(input_body);
 
         let output_lwe_len = self.output_dimension + 1;
+        let coefficient_len = output_lwe_len * basis.decompose_length();
         let negative_one = modulus.reduce_neg(T::ONE);
         let negative_two = modulus.reduce_neg(T::TWO);
-        let mut entries = self.data.chunks_exact(output_lwe_len);
-        for &coefficient in input.a() {
-            let (adjusted, mut carry) = self.basis.init_value_carry(coefficient);
-            for decomposer in self.basis.decomposer_iter() {
+        for (&coefficient, block) in input_mask
+            .iter()
+            .zip(self.data.chunks_exact(coefficient_len))
+        {
+            let (adjusted, mut carry) = basis.init_value_carry(coefficient);
+            for (decomposer, entry) in basis
+                .decomposer_iter()
+                .zip(block.chunks_exact(output_lwe_len))
+            {
                 let (digit, next_carry) = decomposer.decompose(adjusted, carry);
                 carry = next_carry;
-                let key_entry = Lwe(entries.next().expect("invalid key-switching key length"));
+                let key_entry = Lwe(entry);
                 if digit.is_zero() {
                     continue;
                 }
@@ -216,18 +237,20 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
                 }
             }
         }
-        debug_assert!(entries.next().is_none());
 
         output.neg_assign(modulus);
     }
 
     /// Key-switches `input` into a newly allocated ciphertext.
+    ///
+    /// The correctness and panic conditions of [`Self::key_switch_to`] apply;
+    /// the output dimension is determined by this key.
     pub fn key_switch<M, A>(&self, input: &Lwe<A>, modulus: M) -> Lwe<Vec<T>>
     where
         M: RingContext<T>,
         A: Data<Elem = T>,
     {
-        let mut output = Lwe::zero(self.output_dimension);
+        let mut output = Lwe::zero(self.output_dimension());
         self.key_switch_to(input, &mut output, modulus);
         output
     }

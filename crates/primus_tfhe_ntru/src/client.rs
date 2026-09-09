@@ -1,11 +1,8 @@
-use num_traits::Signed;
-use primus_distr::DiscreteGaussian;
 use primus_encoding::PlaintextEmbedding;
-use primus_integer::{FheUint, SignedInteger};
-use primus_lwe::LweCiphertext;
+use primus_integer::FheUint;
+use primus_lwe::{LweCiphertext, LweSecretKeyRef};
 use primus_reduce::RingContext;
 use primus_tfhe::Ciphertext;
-use rand::distr::{Distribution, Uniform};
 
 use crate::{NtruClientKey, NtruKeyError, NtruTfheParameters};
 
@@ -116,14 +113,14 @@ where
         R: rand::Rng + rand::CryptoRng,
     {
         let parameters = self.parameters.external_lwe();
-        encrypt_lwe_with_signed_secret(
-            self.key.external_lwe_secret_key(),
-            message,
+        let plaintext = parameters
+            .plaintext_codec()
+            .encode_value(message, embedding);
+        LweSecretKeyRef::Signed(self.key.external_lwe_secret_key()).encrypt_encoded(
+            plaintext,
             parameters.cipher_modulus(),
             parameters.cipher_modulus_uniform_distr(),
             parameters.noise_distribution(),
-            parameters.plaintext_codec(),
-            embedding,
             rng,
         )
     }
@@ -164,75 +161,10 @@ where
             return Err(NtruClientError::CiphertextDimensionMismatch { expected, actual });
         }
         let parameters = self.parameters.external_lwe();
-        let (mask, body) = ciphertext.as_lwe().a_b();
-        let modulus = parameters.cipher_modulus();
-        let dot_product = modulus.reduce_dot_product_iter(
-            mask.iter().copied(),
-            self.key
-                .external_lwe_secret_key()
-                .iter()
-                .copied()
-                .map(|coefficient| encode_for_ring(coefficient, modulus)),
-        );
-        let message = parameters
-            .plaintext_codec()
-            .decode_value(modulus.reduce_sub(body, dot_product));
+        let phase = LweSecretKeyRef::Signed(self.key.external_lwe_secret_key())
+            .decrypt_phase(ciphertext.as_lwe(), parameters.cipher_modulus());
+        let message = parameters.plaintext_codec().decode_value(phase);
         Msg::try_from(message).map_err(|_| NtruClientError::PlaintextConversion)
-    }
-}
-
-/// Encrypts an LWE sample with a canonical signed ring secret.
-#[allow(clippy::too_many_arguments)]
-fn encrypt_lwe_with_signed_secret<T, M, R>(
-    secret_key: &[T::SignedInteger],
-    message: T,
-    modulus: M,
-    uniform: Uniform<T>,
-    gaussian: &DiscreteGaussian<T>,
-    codec: &primus_encoding::RoundedCodec<T>,
-    embedding: PlaintextEmbedding,
-    rng: &mut R,
-) -> LweCiphertext<T>
-where
-    T: FheUint,
-    M: RingContext<T>,
-    R: rand::Rng + rand::CryptoRng,
-{
-    let mut ciphertext = LweCiphertext::zero(secret_key.len());
-    ciphertext
-        .a_mut()
-        .iter_mut()
-        .zip(uniform.sample_iter(&mut *rng))
-        .for_each(|(output, sample)| *output = sample);
-    let dot_product = modulus.reduce_dot_product_iter(
-        ciphertext.a().iter().copied(),
-        secret_key
-            .iter()
-            .copied()
-            .map(|coefficient| encode_for_ring(coefficient, modulus)),
-    );
-    *ciphertext.b_mut() = modulus.reduce_add(dot_product, gaussian.sample(rng));
-    codec.add_encode_value_assign(ciphertext.b_mut(), message, embedding);
-    ciphertext
-}
-
-/// Encodes a signed secret coefficient in an explicit or native ring.
-#[inline]
-fn encode_for_ring<T, M>(coefficient: T::SignedInteger, modulus: M) -> T
-where
-    T: FheUint,
-    M: RingContext<T>,
-{
-    match modulus.explicit_value() {
-        Some(modulus) => {
-            if coefficient.is_negative() {
-                debug_assert!(coefficient.unsigned_abs() < modulus);
-                modulus.wrapping_add_signed(coefficient)
-            } else {
-                coefficient.cast_to_unsigned()
-            }
-        }
-        None => coefficient.cast_to_unsigned(),
     }
 }
 

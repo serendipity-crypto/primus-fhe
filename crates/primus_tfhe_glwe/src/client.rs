@@ -1,12 +1,11 @@
-use primus_distr::DiscreteGaussian;
-use primus_integer::{FheUint, SignedInteger};
+use primus_integer::FheUint;
+use primus_lwe::LweSecretKeyRef;
 use primus_reduce::RingContext;
 use primus_tfhe::Ciphertext;
-use rand::distr::{Distribution, Uniform};
 
 use crate::{
     GlweClientKey, GlweKeyError, GlwePbsOrder, GlweTfheParameters, LweCiphertext,
-    PlaintextEmbedding, RoundedCodec, encode_secret_coefficient,
+    PlaintextEmbedding,
 };
 
 /// Encrypts raw TFHE messages with a particular encryption key.
@@ -131,28 +130,23 @@ where
         match self.parameters.pbs_order() {
             GlwePbsOrder::BootstrapKeyswitch => {
                 let parameters = self.parameters.small_lwe();
-                encrypt_lwe_with_secret(
-                    self.key.small_lwe_secret_key().as_ref(),
-                    message,
-                    parameters.cipher_modulus(),
-                    parameters.cipher_modulus_uniform_distr(),
-                    parameters.noise_distribution(),
-                    parameters.plaintext_codec(),
-                    embedding,
-                    rng,
-                )
+                self.key
+                    .small_lwe_secret_key()
+                    .encrypt_with_embedding(message, parameters, rng, embedding)
             }
             GlwePbsOrder::KeyswitchBootstrap => {
                 // TFHE construction validates equal t and q for both key domains.
                 let parameters = self.parameters.glwe();
-                encrypt_lwe_with_signed_secret(
-                    self.key.glwe_secret_key().as_slice(),
-                    message,
+                let plaintext = self
+                    .parameters
+                    .small_lwe()
+                    .plaintext_codec()
+                    .encode_value(message, embedding);
+                LweSecretKeyRef::Signed(self.key.glwe_secret_key().as_slice()).encrypt_encoded(
+                    plaintext,
                     parameters.cipher_modulus(),
                     parameters.cipher_modulus_uniform_distr(),
                     parameters.noise_distribution(),
-                    self.parameters.small_lwe().plaintext_codec(),
-                    embedding,
                     rng,
                 )
             }
@@ -200,131 +194,22 @@ where
         let message: T = match self.parameters.pbs_order() {
             GlwePbsOrder::BootstrapKeyswitch => {
                 let parameters = self.parameters.small_lwe();
-                decrypt_lwe_with_secret(
-                    self.key.small_lwe_secret_key().as_ref(),
-                    ciphertext.as_lwe(),
-                    parameters.cipher_modulus(),
-                    parameters.plaintext_codec(),
-                )
+                self.key
+                    .small_lwe_secret_key()
+                    .decrypt(ciphertext.as_lwe(), parameters)
             }
             GlwePbsOrder::KeyswitchBootstrap => {
                 // TFHE construction validates equal t and q for both key domains.
                 let parameters = self.parameters.glwe();
-                decrypt_lwe_with_signed_secret(
-                    self.key.glwe_secret_key().as_slice(),
-                    ciphertext.as_lwe(),
-                    parameters.cipher_modulus(),
-                    self.parameters.small_lwe().plaintext_codec(),
-                )
+                let phase = LweSecretKeyRef::Signed(self.key.glwe_secret_key().as_slice())
+                    .decrypt_phase(ciphertext.as_lwe(), parameters.cipher_modulus());
+                self.parameters
+                    .small_lwe()
+                    .plaintext_codec()
+                    .decode_value(phase)
             }
         };
         Msg::try_from(message).map_err(|_| GlweClientError::PlaintextConversion)
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn encrypt_lwe_with_secret<T, M, R>(
-    secret_key: &[T],
-    message: T,
-    modulus: M,
-    uniform: Uniform<T>,
-    gaussian: &DiscreteGaussian<T>,
-    codec: &RoundedCodec<T>,
-    embedding: PlaintextEmbedding,
-    rng: &mut R,
-) -> LweCiphertext<T>
-where
-    T: FheUint,
-    M: RingContext<T>,
-    R: rand::Rng + rand::CryptoRng,
-{
-    let mut ciphertext =
-        LweCiphertext::generate_random_zero_sample(secret_key, modulus, uniform, gaussian, rng);
-    codec.add_encode_value_assign(ciphertext.b_mut(), message, embedding);
-    ciphertext
-}
-
-fn decrypt_lwe_with_secret<T, M>(
-    secret_key: &[T],
-    ciphertext: &LweCiphertext<T>,
-    modulus: M,
-    codec: &RoundedCodec<T>,
-) -> T
-where
-    T: FheUint,
-    M: RingContext<T>,
-{
-    let (mask, body) = ciphertext.a_b();
-    debug_assert_eq!(mask.len(), secret_key.len());
-    let plaintext = modulus.reduce_sub(body, modulus.reduce_dot_product(mask, secret_key));
-    codec.decode_value(plaintext)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn encrypt_lwe_with_signed_secret<T, M, R>(
-    secret_key: &[T::SignedInteger],
-    message: T,
-    modulus: M,
-    uniform: Uniform<T>,
-    gaussian: &DiscreteGaussian<T>,
-    codec: &RoundedCodec<T>,
-    embedding: PlaintextEmbedding,
-    rng: &mut R,
-) -> LweCiphertext<T>
-where
-    T: FheUint,
-    M: RingContext<T>,
-    R: rand::Rng + rand::CryptoRng,
-{
-    let mut ciphertext = LweCiphertext::zero(secret_key.len());
-    ciphertext
-        .a_mut()
-        .iter_mut()
-        .zip(uniform.sample_iter(&mut *rng))
-        .for_each(|(output, sample)| *output = sample);
-    let dot_product = modulus.reduce_dot_product_iter(
-        ciphertext.a().iter().copied(),
-        secret_key
-            .iter()
-            .copied()
-            .map(|coefficient| encode_for_ring(coefficient, modulus)),
-    );
-    *ciphertext.b_mut() = modulus.reduce_add(dot_product, gaussian.sample(rng));
-    codec.add_encode_value_assign(ciphertext.b_mut(), message, embedding);
-    ciphertext
-}
-
-fn decrypt_lwe_with_signed_secret<T, M>(
-    secret_key: &[T::SignedInteger],
-    ciphertext: &LweCiphertext<T>,
-    modulus: M,
-    codec: &RoundedCodec<T>,
-) -> T
-where
-    T: FheUint,
-    M: RingContext<T>,
-{
-    let (mask, body) = ciphertext.a_b();
-    debug_assert_eq!(mask.len(), secret_key.len());
-    let dot_product = modulus.reduce_dot_product_iter(
-        mask.iter().copied(),
-        secret_key
-            .iter()
-            .copied()
-            .map(|coefficient| encode_for_ring(coefficient, modulus)),
-    );
-    codec.decode_value(modulus.reduce_sub(body, dot_product))
-}
-
-#[inline]
-fn encode_for_ring<T, M>(coefficient: T::SignedInteger, modulus: M) -> T
-where
-    T: FheUint,
-    M: RingContext<T>,
-{
-    match modulus.explicit_value() {
-        Some(modulus) => encode_secret_coefficient(coefficient, modulus),
-        None => coefficient.cast_to_unsigned(),
     }
 }
 

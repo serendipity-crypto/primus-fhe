@@ -7,7 +7,7 @@ use primus_glwe::{
     GlweCiphertext, GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext,
     NttGlweKeySwitchingContext, NttGlweKeySwitchingKey, NttGlweSecretKey,
 };
-use primus_lwe::{LweCiphertext, LweKeySwitchingKey, LweKeySwitchingParameters, LweSecretKey};
+use primus_lwe::{LweCiphertext, LweKeySwitchingKey, LweSecretKey, LweSecretKeyRef};
 use primus_ntt::{NttTable, U32NttTable};
 use primus_tfhe_glwe_ntt::{ClientKey, boolean_parameters};
 
@@ -28,16 +28,11 @@ fn bench_key_switch(c: &mut Criterion) {
     let lwe_secret_key = client_key.small_lwe_secret_key();
     let input_glwe_secret_key = client_key.glwe_secret_key();
 
-    let lwe_key_switching_parameters = LweKeySwitchingParameters::new(
-        parameters.glwe().secret_key_len(),
-        lwe_dimension,
-        parameters.glwe_key_switching().output().basis().clone(),
-    );
-    let lwe_key_switching_key = LweKeySwitchingKey::generate_from_signed(
-        input_glwe_secret_key.as_slice(),
+    let lwe_key_switching_key = LweKeySwitchingKey::generate(
+        LweSecretKeyRef::Signed(input_glwe_secret_key.as_slice()),
         lwe_secret_key,
         parameters.small_lwe(),
-        &lwe_key_switching_parameters,
+        parameters.glwe_key_switching().output().basis().clone(),
         &mut rng,
     );
 

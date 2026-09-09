@@ -1,4 +1,3 @@
-use primus_decompose::primitive::ApproxSignedBasis;
 use primus_distr::DiscreteGaussian;
 use primus_integer::FheUint;
 use primus_reduce::RingContext;
@@ -6,74 +5,14 @@ use rand::distr::Uniform;
 
 use crate::{RoundedCodec, SecretKeyDistr};
 
-/// Parameters controlling an LWE key-switching key.
-///
-/// The input and output ciphertext moduli are supplied by the corresponding
-/// [`LweParameters`] at key generation or evaluation time. Keeping them out of
-/// this type avoids cloning complete LWE parameter sets.
-#[derive(Debug, Clone)]
-pub struct LweKeySwitchingParameters<T: FheUint> {
-    input_dimension: usize,
-    output_dimension: usize,
-    basis: ApproxSignedBasis<T>,
-}
-
-impl<T: FheUint> LweKeySwitchingParameters<T> {
-    /// Creates LWE key-switching parameters.
-    ///
-    /// # Panics
-    ///
-    /// Panics if either LWE dimension is zero.
-    pub fn new(
-        input_dimension: usize,
-        output_dimension: usize,
-        basis: ApproxSignedBasis<T>,
-    ) -> Self {
-        assert!(input_dimension > 0, "input LWE dimension must be non-zero");
-        assert!(
-            output_dimension > 0,
-            "output LWE dimension must be non-zero"
-        );
-        Self {
-            input_dimension,
-            output_dimension,
-            basis,
-        }
-    }
-
-    /// Returns the dimension of ciphertexts before key switching.
-    #[inline]
-    pub fn input_dimension(&self) -> usize {
-        self.input_dimension
-    }
-
-    /// Returns the dimension of ciphertexts after key switching.
-    #[inline]
-    pub fn output_dimension(&self) -> usize {
-        self.output_dimension
-    }
-
-    /// Returns the decomposition basis used by key switching.
-    #[inline]
-    pub fn basis(&self) -> &ApproxSignedBasis<T> {
-        &self.basis
-    }
-
-    /// Returns the decomposition length.
-    #[inline]
-    pub fn decompose_length(&self) -> usize {
-        self.basis.decompose_length()
-    }
-}
-
-/// Lwe Parameters.
+/// Parameters and precomputed samplers for LWE with a nonzero vector dimension.
 #[derive(Clone)]
 pub struct LweParameters<T, M>
 where
     T: FheUint,
     M: RingContext<T>,
 {
-    /// **LWE** vector dimension, refers to **n** in the paper.
+    /// Nonzero **LWE** vector dimension, refers to **n** in the paper.
     dimension: usize,
     /// **LWE** message modulus, refers to **t** in the paper.
     plain_modulus_value: T,
@@ -85,7 +24,7 @@ where
     plaintext_codec: RoundedCodec<T>,
     /// The distribution type of the LWE Secret Key.
     secret_key_distr: SecretKeyDistr,
-    secret_key_distribution: Option<DiscreteGaussian<T>>,
+    secret_key_gaussian: Option<DiscreteGaussian<T>>,
     /// The noise distribution.
     noise_distribution: DiscreteGaussian<T>,
 }
@@ -96,6 +35,14 @@ where
     M: RingContext<T>,
 {
     /// Creates a new [`LweParameters<T, M>`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `dimension` is zero, the secret distribution is invalid for
+    /// `dimension`, either Gaussian sampler fails the validity rules of
+    /// [`DiscreteGaussian::new`],
+    /// or the plaintext/ciphertext moduli fail the rules of
+    /// [`RoundedCodec::new`](primus_encoding::RoundedCodec::new).
     #[inline]
     pub fn new(
         dimension: usize,
@@ -104,6 +51,7 @@ where
         secret_key_distr: SecretKeyDistr,
         noise_standard_deviation: f64,
     ) -> Self {
+        assert!(dimension != 0, "LWE dimension must be non-zero");
         secret_key_distr
             .validate_for_length(dimension)
             .expect("invalid LWE secret-key distribution");
@@ -111,12 +59,12 @@ where
 
         let noise_distribution =
             DiscreteGaussian::new(noise_standard_deviation, cipher_modulus_minus_one).unwrap();
-        let secret_key_distribution = match secret_key_distr {
-            SecretKeyDistr::Gaussian(standard_deviation) => {
+        let secret_key_gaussian =
+            if let SecretKeyDistr::Gaussian(standard_deviation) = secret_key_distr {
                 Some(DiscreteGaussian::new(standard_deviation, cipher_modulus_minus_one).unwrap())
-            }
-            _ => None,
-        };
+            } else {
+                None
+            };
 
         let cipher_modulus_uniform_distr = cipher_modulus.uniform_distribution();
         let plaintext_codec =
@@ -130,7 +78,7 @@ where
             cipher_modulus_uniform_distr,
             plaintext_codec,
             secret_key_distr,
-            secret_key_distribution,
+            secret_key_gaussian,
             noise_distribution,
         }
     }
@@ -184,8 +132,8 @@ where
     }
 
     #[inline]
-    pub(crate) fn secret_key_distribution(&self) -> Option<&DiscreteGaussian<T>> {
-        self.secret_key_distribution.as_ref()
+    pub(crate) fn secret_key_gaussian(&self) -> Option<&DiscreteGaussian<T>> {
+        self.secret_key_gaussian.as_ref()
     }
 
     /// Returns the noise standard deviation of this [`LweParameters<T, M>`].
@@ -198,14 +146,5 @@ where
     #[inline]
     pub fn noise_distribution(&self) -> &DiscreteGaussian<T> {
         &self.noise_distribution
-    }
-
-    /// Gets the discrete gaussian noise distribution.
-    #[inline]
-    pub fn noise_distribution_div_count(&self, count: u32, min_sigma: f64) -> DiscreteGaussian<T> {
-        let noise_standard_deviation = self.noise_standard_deviation();
-        let var = noise_standard_deviation * noise_standard_deviation;
-        let sigma = (var / count as f64).sqrt().max(min_sigma);
-        DiscreteGaussian::new(sigma, self.cipher_modulus_minus_one).unwrap()
     }
 }

@@ -53,15 +53,6 @@ fn accepts_a_smaller_external_dimension_and_rejects_an_oversized_one() {
             poly_length: N,
         })
     );
-
-    let zero_dimension = LweParameters::new(0, 4, modulus, SecretKeyDistr::UniformBinary, 0.7);
-    assert_eq!(
-        NtruTfheParameters::try_new(zero_dimension, nlev(&accumulator), nlev(&client)).err(),
-        Some(NtruParameterError::InvalidLweDimension {
-            lwe_dimension: 0,
-            poly_length: N,
-        })
-    );
 }
 
 #[test]

@@ -457,15 +457,8 @@ where
     M: RingContext<u32>,
 {
     let modulus = parameters.cipher_modulus();
-    let (mask, body) = ciphertext.as_lwe().a_b();
-    let dot_product = modulus.reduce_dot_product_iter(
-        mask.iter().copied(),
-        secret_key
-            .iter()
-            .copied()
-            .map(|coefficient| encode_secret(coefficient, modulus)),
-    );
-    let phase = modulus.reduce_sub(body, dot_product);
+    let phase =
+        primus_lwe::LweSecretKeyRef::Signed(secret_key).decrypt_phase(ciphertext.as_lwe(), modulus);
     let decoded = parameters.plaintext_codec().decode_value(phase);
     let expected_encoding = parameters
         .plaintext_codec()
@@ -474,17 +467,6 @@ where
         .reduce_sub(phase, expected_encoding)
         .min(modulus.reduce_sub(expected_encoding, phase));
     OutputMeasurement { decoded, noise }
-}
-
-fn encode_secret<M>(coefficient: i32, modulus: M) -> u32
-where
-    M: RingContext<u32>,
-{
-    if coefficient < 0 {
-        modulus.reduce_neg(modulus.reduce(coefficient.wrapping_neg() as u32))
-    } else {
-        modulus.reduce(coefficient as u32)
-    }
 }
 
 /// Returns half the smallest cyclic distance between adjacent plaintext encodings.

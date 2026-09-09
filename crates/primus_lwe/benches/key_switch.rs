@@ -7,7 +7,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use primus_decompose::primitive::ApproxSignedBasis;
 use primus_lattice::lwe::Lwe;
 use primus_lwe::{
-    LweKeySwitchingKey, LweKeySwitchingParameters, LweParameters, LweSecretKey, SecretKeyDistr,
+    LweKeySwitchingKey, LweParameters, LweSecretKey, LweSecretKeyRef, SecretKeyDistr,
 };
 use primus_modulus::BarrettModulus;
 use rand::distr::{Distribution, Uniform};
@@ -35,14 +35,12 @@ fn bench_key_switch(c: &mut Criterion) {
     group.sample_size(10);
 
     for input_dimension in [1024, 2048] {
-        let parameters =
-            LweKeySwitchingParameters::new(input_dimension, OUTPUT_DIMENSION, basis.clone());
         let input_secret_key = vec![1u32; input_dimension];
         let key = LweKeySwitchingKey::generate(
-            &input_secret_key,
+            LweSecretKeyRef::Encoded(&input_secret_key),
             &output_secret_key,
             &output_parameters,
-            &parameters,
+            basis.clone(),
             &mut rng,
         );
         let mut input: Lwe<Vec<u32>> = Lwe::zero(input_dimension);
@@ -52,6 +50,18 @@ fn bench_key_switch(c: &mut Criterion) {
             .zip(uniform.sample_iter(&mut rng))
             .for_each(|(output, sample)| *output = sample);
         let mut output: Lwe<Vec<u32>> = Lwe::zero(OUTPUT_DIMENSION);
+
+        group.bench_function(BenchmarkId::new("generate", input_dimension), |bencher| {
+            bencher.iter(|| {
+                LweKeySwitchingKey::generate(
+                    LweSecretKeyRef::Encoded(black_box(&input_secret_key)),
+                    &output_secret_key,
+                    &output_parameters,
+                    basis.clone(),
+                    &mut rng,
+                )
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new(

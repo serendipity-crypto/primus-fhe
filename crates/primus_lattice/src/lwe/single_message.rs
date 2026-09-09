@@ -1,10 +1,6 @@
-use std::mem::MaybeUninit;
-
 use primus_data::{Data, DataMut, DataOwned, RawData};
-use primus_distr::DiscreteGaussian;
 use primus_integer::{FheUint, Size};
-use primus_reduce::{Modulus, prelude::*};
-use rand::distr::{Distribution, Uniform};
+use primus_reduce::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// An LWE ciphertext with mask `a` followed by one scalar body `b`.
@@ -46,60 +42,6 @@ where
     #[inline]
     pub fn zero(dimension: usize) -> Self {
         Self(S::from_vec(vec![T::ZERO; dimension + 1]))
-    }
-}
-
-impl<T> Lwe<Vec<T>>
-where
-    T: FheUint,
-{
-    /// Generate a [`Lwe`] sample which encrypts `0`.
-    ///
-    /// # Correctness
-    ///
-    /// The secret and sampled values must satisfy the modular dot-product and
-    /// addition input ranges. `uniform` must sample the mask uniformly modulo
-    /// `modulus`; `gaussian` must encode signed noise in the same modulus.
-    /// Neither distribution is checked against `modulus`. The output dimension
-    /// is `secret_key.len()`; its phase is the sampled noise. The caller chooses
-    /// noise and key parameters appropriate to the enclosing encryption scheme.
-    #[inline]
-    pub fn generate_random_zero_sample<M, R>(
-        secret_key: &[T],
-        modulus: M,
-        uniform: Uniform<T>,
-        gaussian: &DiscreteGaussian<T>,
-        rng: &mut R,
-    ) -> Self
-    where
-        M: Copy + Modulus<ValueT = T> + ReduceDotProduct<T> + ReduceAdd<T, Output = T>,
-        R: rand::Rng + rand::CryptoRng,
-    {
-        let len = secret_key.len();
-
-        let mut data: Vec<MaybeUninit<T>> = Vec::with_capacity(len + 1);
-        // SAFETY: The allocation holds len + 1 MaybeUninit elements; leaving
-        // these elements uninitialized is valid until they are written below.
-        unsafe {
-            data.set_len(len + 1);
-        }
-        data[0..len]
-            .iter_mut()
-            .zip(uniform.sample_iter(&mut *rng))
-            .for_each(|(x, y)| {
-                x.write(y);
-            });
-        data[len].write(gaussian.sample(rng));
-
-        // SAFETY: Uniform::sample_iter is unbounded, so the zip initializes
-        // every mask entry; the body is written separately. MaybeUninit<T>
-        // has the same layout as T, including allocation size and alignment.
-        let mut data = unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(data) };
-
-        let b = modulus.reduce_dot_product(&data[0..len], secret_key);
-        data[len] = modulus.reduce_add(b, data[len]);
-
-        Lwe(data)
     }
 }
 
