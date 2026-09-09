@@ -87,7 +87,7 @@ fn cached_weights_and_centered_digits_follow_rns_order() {
             );
             // Lifted digits are modulus-major, while full-width digits are value-major.
             for (&modulus, chunk) in moduli.iter().zip(residues.chunks_exact(count)) {
-                for (&residue, digit) in chunk.iter().zip(signed_digits.chunks_exact(2)) {
+                for (&residue, digit) in chunk.iter().zip(signed_digits.as_chunks::<2>().0) {
                     let digit = u64::from(digit[0]) | (u64::from(digit[1]) << 32);
                     assert_eq!(u64::from(residue), digit % u64::from(modulus));
                 }

@@ -30,8 +30,6 @@ fn bench_expand_coeff(c: &mut Criterion) {
 
     let current_num_threads = rayon::current_num_threads();
 
-    println!("Max threads count: {}", current_num_threads);
-
     for log_n in [10u32, 11, 12] {
         let poly_length = 1usize << log_n;
         let table = U64DcrtTable::new(log_n, &moduli).unwrap();
