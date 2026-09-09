@@ -10,7 +10,7 @@ macro_rules! impl_common {
             S: RawData,
             <S as RawData>::Elem: FheUint,
         {
-            #[doc = concat!(r" Creates a new [`",stringify!($cipher),"<",stringify!(S),">`].")]
+            #[doc = concat!("Wraps the supplied storage as a [`", stringify!($cipher), "<S>`].")]
             ///
             /// # Correctness
             ///
@@ -55,7 +55,7 @@ macro_rules! impl_bytes_io {
             S: DataOwned<Elem = T>,
             T: FheUint,
         {
-            #[doc = concat!(r" Creates a new [`",stringify!($cipher),"<",stringify!(S),">`] from bytes `data`.")]
+            #[doc = concat!("Creates a [`", stringify!($cipher), "<S>`] by copying native-endian elements from `data`.")]
             ///
             /// The byte representation is native-endian raw element storage, without
             /// layout, modulus, or transform metadata. It is not a portable serialization
@@ -153,7 +153,7 @@ macro_rules! impl_zero {
             T: FheUint,
         {
             pastey::paste! {
-                #[doc = concat!(r" Creates a new [`",stringify!($cipher),"<",stringify!(S),">`] with all values or coefficients equal to zero.")]
+                #[doc = "Creates a zero-initialized [`" $cipher "<S>`]."]
                 ///
                 /// # Correctness
                 ///

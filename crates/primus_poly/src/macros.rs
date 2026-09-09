@@ -1,7 +1,7 @@
 macro_rules! impl_iters {
     ($poly:ident, $short_name:ident) => {
         pastey::paste! {
-            #[doc = concat!("Immutable chunked iterator over [`", stringify!($poly), "`] elements.")]
+            #[doc = "Immutable chunked iterator over [`" $poly "`] elements."]
             #[derive(Debug, Clone)]
             pub struct [<$poly Iter>]<'a, T>
             where
@@ -12,13 +12,13 @@ macro_rules! impl_iters {
             }
 
             impl<'a, T: FheUint> [<$poly Iter>]<'a, T> {
-                #[doc = concat!("Creates a new [`", stringify!($poly), "Iter`] from the data slice and chunk size.")]
-                #[doc = ""]
-                #[doc = "Any trailing elements that do not fill a complete chunk are not yielded."]
-                #[doc = ""]
-                #[doc = "# Panics"]
-                #[doc = ""]
-                #[doc = "Panics if the chunk size is zero."]
+                #[doc = "Creates a [`" [<$poly Iter>] "`] from the data slice and chunk size."]
+                ///
+                /// Any trailing elements that do not fill a complete chunk are not yielded.
+                ///
+                /// # Panics
+                ///
+                /// Panics if the chunk size is zero.
                 #[must_use]
                 #[inline]
                 pub fn new(data:&'a [T], [<$short_name _len>]:usize) -> Self{
@@ -73,7 +73,7 @@ macro_rules! impl_iters {
         }
 
         pastey::paste! {
-            #[doc = concat!("Mutable chunked iterator over [`", stringify!($poly), "`] elements.")]
+            #[doc = "Mutable chunked iterator over [`" $poly "`] elements."]
             #[derive(Debug)]
             pub struct [<$poly IterMut>]<'a, T>
             where
@@ -84,13 +84,13 @@ macro_rules! impl_iters {
             }
 
             impl<'a, T: FheUint> [<$poly IterMut>]<'a, T> {
-                #[doc = concat!("Creates a new mutable [`", stringify!($poly), "IterMut`] from the data slice and chunk size.")]
-                #[doc = ""]
-                #[doc = "Any trailing elements that do not fill a complete chunk are not yielded."]
-                #[doc = ""]
-                #[doc = "# Panics"]
-                #[doc = ""]
-                #[doc = "Panics if the chunk size is zero."]
+                #[doc = "Creates a [`" [<$poly IterMut>] "`] from the data slice and chunk size."]
+                ///
+                /// Any trailing elements that do not fill a complete chunk are not yielded.
+                ///
+                /// # Panics
+                ///
+                /// Panics if the chunk size is zero.
                 #[must_use]
                 #[inline]
                 pub fn new(data:&'a mut [T], [<$short_name _len>]:usize) -> Self{

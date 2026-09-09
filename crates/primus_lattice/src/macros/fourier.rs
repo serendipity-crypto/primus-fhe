@@ -9,30 +9,26 @@
 macro_rules! impl_fourier_iters {
     ($cipher:ident) => {
         pastey::paste! {
-            #[doc = concat!(
-                "Immutable chunked iterator over [`",
-                stringify!($cipher),
-                "`] ciphertexts."
-            )]
+            #[doc = "Immutable chunked iterator over [`" $cipher "`] ciphertexts."]
             #[derive(Debug, Clone)]
             pub struct [<$cipher Iter>]<'a> {
                 iter: core::slice::ChunksExact<'a, num_complex::Complex64>,
             }
 
             impl<'a> [<$cipher Iter>]<'a> {
-                #[doc = concat!(
-                    "Creates an iterator yielding [`",
-                    stringify!($cipher),
-                    "`] views containing `", stringify!([<$cipher:snake _len>]), "` complex values each.",
-                    "\n\n# Correctness\n\nAny incomplete trailing chunk is omitted. The caller must provide a complete ciphertext layout.",
-                    "\n\n# Panics\n\nPanics if `", stringify!([<$cipher:snake _len>]), "` is zero."
-                )]
+                #[doc = "Creates an iterator yielding [`" $cipher "`] views."]
+                ///
+                #[doc = "Each view contains `" [<$cipher:snake _len>] "` complex values."]
+                /// Any incomplete trailing chunk is omitted.
                 ///
                 /// # Correctness
                 ///
-                /// This only wraps storage. The caller must supply the complete layout and
-                /// representation documented for this ciphertext; no cryptographic metadata
-                /// is inferred or validated.
+                /// Each chunk must have the complete layout and representation documented
+                /// for this ciphertext. Cryptographic metadata is neither inferred nor validated.
+                ///
+                /// # Panics
+                ///
+                #[doc = "Panics if `" [<$cipher:snake _len>] "` is zero."]
                 #[must_use]
                 #[inline]
                 pub fn new(data: &'a [num_complex::Complex64], [<$cipher:snake _len>]: usize) -> Self {
@@ -67,30 +63,26 @@ macro_rules! impl_fourier_iters {
         }
 
         pastey::paste! {
-            #[doc = concat!(
-                "Mutable chunked iterator over [`",
-                stringify!($cipher),
-                "`] ciphertexts."
-            )]
+            #[doc = "Mutable chunked iterator over [`" $cipher "`] ciphertexts."]
             #[derive(Debug)]
             pub struct [<$cipher IterMut>]<'a> {
                 iter: core::slice::ChunksExactMut<'a, num_complex::Complex64>,
             }
 
             impl<'a> [<$cipher IterMut>]<'a> {
-                #[doc = concat!(
-                    "Creates a mutable iterator yielding [`",
-                    stringify!($cipher),
-                    "`] views containing `", stringify!([<$cipher:snake _len>]), "` complex values each.",
-                    "\n\n# Correctness\n\nAny incomplete trailing chunk is omitted. The caller must provide a complete ciphertext layout.",
-                    "\n\n# Panics\n\nPanics if `", stringify!([<$cipher:snake _len>]), "` is zero."
-                )]
+                #[doc = "Creates a mutable iterator yielding [`" $cipher "`] views."]
+                ///
+                #[doc = "Each view contains `" [<$cipher:snake _len>] "` complex values."]
+                /// Any incomplete trailing chunk is omitted.
                 ///
                 /// # Correctness
                 ///
-                /// This only wraps storage. The caller must supply the complete layout and
-                /// representation documented for this ciphertext; no cryptographic metadata
-                /// is inferred or validated.
+                /// Each chunk must have the complete layout and representation documented
+                /// for this ciphertext. Cryptographic metadata is neither inferred nor validated.
+                ///
+                /// # Panics
+                ///
+                #[doc = "Panics if `" [<$cipher:snake _len>] "` is zero."]
                 #[must_use]
                 #[inline]
                 pub fn new(data: &'a mut [num_complex::Complex64], [<$cipher:snake _len>]: usize) -> Self {
@@ -131,7 +123,7 @@ macro_rules! impl_fourier_iters {
 macro_rules! impl_fourier_core {
     ($cipher:ident) => {
         pastey::paste! {
-            #[doc = concat!("Owned [`", stringify!($cipher), "`] backed by a [`Vec`].")]
+            #[doc = "Owned [`" $cipher "`] backed by a [`Vec`]."]
             pub type [<$cipher Owned>] = $cipher<Vec<num_complex::Complex64>>;
         }
 
@@ -139,7 +131,9 @@ macro_rules! impl_fourier_core {
         where
             S: primus_data::RawData<Elem = num_complex::Complex64>,
         {
-            #[doc = concat!("Creates a new [`", stringify!($cipher), "`].")]
+            #[doc = concat!(
+                "Wraps the supplied Fourier-domain storage as a [`", stringify!($cipher), "<S>`]."
+            )]
             ///
             /// # Correctness
             ///
@@ -158,11 +152,12 @@ macro_rules! impl_fourier_core {
             S: primus_data::RawData<Elem = num_complex::Complex64> + primus_data::DataOwned,
         {
             pastey::paste! {
-                #[doc = concat!("Creates a zero-initialized [`", stringify!($cipher), "`].")]
-                #[inline]
+                #[doc = "Creates a zero-initialized [`" $cipher "<S>`]."]
+                ///
                 /// The length is the total number of complex Fourier values,
                 /// including every polynomial and ciphertext component.
                 #[must_use]
+                #[inline]
                 pub fn zero([< $cipher:snake _len >]: usize) -> Self {
                     Self(S::from_vec(vec![
                         num_complex::Complex64::default();
@@ -228,11 +223,18 @@ macro_rules! impl_fourier_iter_sub {
             where
                 S: primus_data::RawData<Elem = num_complex::Complex64> + primus_data::Data,
             {
-                #[doc = concat!(
-                    "Returns an iterator over the [`", stringify!($sub), "`] sub-components, each containing `", stringify!([<$method _len>]), "` complex values.",
-                    "\n\n# Correctness\n\nThe chunk length must describe one complete sub-component. Incomplete trailing chunks are omitted.",
-                    "\n\n# Panics\n\nPanics if `", stringify!([<$method _len>]), "` is zero."
-                )]
+                #[doc = "Returns an iterator over the [`" $sub "`] sub-components."]
+                ///
+                #[doc = "Each sub-component contains `" [<$method _len>] "` complex values."]
+                /// Any incomplete trailing chunk is omitted.
+                ///
+                /// # Correctness
+                ///
+                /// The chunk length must describe one complete sub-component.
+                ///
+                /// # Panics
+                ///
+                #[doc = "Panics if `" [<$method _len>] "` is zero."]
                 #[inline]
                 pub fn [<iter_ $method>](
                     &self,
@@ -246,13 +248,18 @@ macro_rules! impl_fourier_iter_sub {
             where
                 S: primus_data::RawData<Elem = num_complex::Complex64> + primus_data::DataMut,
             {
-                #[doc = concat!(
-                    "Returns a mutable iterator over the [`",
-                    stringify!($sub),
-                    "`] sub-components, each containing `", stringify!([<$method _len>]), "` complex values.",
-                    "\n\n# Correctness\n\nThe chunk length must describe one complete sub-component. Incomplete trailing chunks are omitted.",
-                    "\n\n# Panics\n\nPanics if `", stringify!([<$method _len>]), "` is zero."
-                )]
+                #[doc = "Returns a mutable iterator over the [`" $sub "`] sub-components."]
+                ///
+                #[doc = "Each sub-component contains `" [<$method _len>] "` complex values."]
+                /// Any incomplete trailing chunk is omitted.
+                ///
+                /// # Correctness
+                ///
+                /// The chunk length must describe one complete sub-component.
+                ///
+                /// # Panics
+                ///
+                #[doc = "Panics if `" [<$method _len>] "` is zero."]
                 #[inline]
                 pub fn [<iter_ $method _mut>](
                     &mut self,

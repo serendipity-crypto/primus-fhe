@@ -7,7 +7,7 @@
 macro_rules! impl_iters {
     ($cipher:ident) => {
         pastey::paste! {
-            #[doc = concat!("Immutable chunked iterator over [`", stringify!($cipher), "`] ciphertexts.")]
+            #[doc = "Immutable chunked iterator over [`" $cipher "`] ciphertexts."]
             pub struct [<$cipher Iter>]<'a, T>
             where
                 T: FheUint,
@@ -17,13 +17,15 @@ macro_rules! impl_iters {
             }
 
             impl<'a, T: FheUint> [<$cipher Iter>]<'a, T> {
-                #[doc = concat!("Creates an iterator yielding [`", stringify!($cipher), "`] chunks of `", stringify!([<$cipher:snake _len>]), "` elements each.")]
+                #[doc = "Creates an iterator yielding [`" $cipher "`] views."]
                 ///
+                #[doc = "Each view contains `" [<$cipher:snake _len>] "` elements."]
+                /// Any incomplete trailing chunk is omitted.
                 ///
                 /// # Correctness
                 ///
                 /// The chunk length must describe one complete sub-ciphertext in the
-                /// intended layout. An incomplete trailing chunk is omitted.
+                /// intended layout.
                 ///
                 /// # Panics
                 ///
@@ -56,7 +58,7 @@ macro_rules! impl_iters {
         }
 
         pastey::paste! {
-            #[doc = concat!("Mutable chunked iterator over [`", stringify!($cipher), "`] ciphertexts.")]
+            #[doc = "Mutable chunked iterator over [`" $cipher "`] ciphertexts."]
             pub struct [<$cipher IterMut>]<'a, T>
             where
                 T: FheUint,
@@ -66,13 +68,15 @@ macro_rules! impl_iters {
             }
 
             impl<'a, T: FheUint> [<$cipher IterMut>]<'a, T> {
-                #[doc = concat!("Creates a mutable iterator yielding [`", stringify!($cipher), "`] chunks of `", stringify!([<$cipher:snake _len>]), "` elements each.")]
+                #[doc = "Creates a mutable iterator yielding [`" $cipher "`] views."]
                 ///
+                #[doc = "Each view contains `" [<$cipher:snake _len>] "` elements."]
+                /// Any incomplete trailing chunk is omitted.
                 ///
                 /// # Correctness
                 ///
                 /// The chunk length must describe one complete sub-ciphertext in the
-                /// intended layout. An incomplete trailing chunk is omitted.
+                /// intended layout.
                 ///
                 /// # Panics
                 ///
@@ -119,13 +123,14 @@ macro_rules! impl_iter_sub_structure {
             T: FheUint,
         {
             pastey::paste! {
-                #[doc = concat!("Returns an iterator over the [`", stringify!($sub), "`] sub-components of this `", stringify!($cipher), "`.")]
+                #[doc = "Returns an iterator over the [`" $sub "`] sub-components of this [`" $cipher "<S>`]."]
                 ///
+                /// Any incomplete trailing chunk is omitted.
                 ///
                 /// # Correctness
                 ///
                 /// The chunk length must describe one complete sub-ciphertext in the
-                /// intended layout. An incomplete trailing chunk is omitted.
+                /// intended layout.
                 ///
                 /// # Panics
                 ///
@@ -143,13 +148,14 @@ macro_rules! impl_iter_sub_structure {
             T: FheUint,
         {
             pastey::paste! {
-                #[doc = concat!("Returns a mutable iterator over the [`", stringify!($sub), "`] sub-components of this `", stringify!($cipher), "`.")]
+                #[doc = "Returns a mutable iterator over the [`" $sub "`] sub-components of this [`" $cipher "<S>`]."]
                 ///
+                /// Any incomplete trailing chunk is omitted.
                 ///
                 /// # Correctness
                 ///
                 /// The chunk length must describe one complete sub-ciphertext in the
-                /// intended layout. An incomplete trailing chunk is omitted.
+                /// intended layout.
                 ///
                 /// # Panics
                 ///
