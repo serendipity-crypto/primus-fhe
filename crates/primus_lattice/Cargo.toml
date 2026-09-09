@@ -19,7 +19,7 @@ primus_fft = { path = "../primus_fft" }
 serde = { workspace = true }
 bytemuck = { workspace = true }
 rand = { workspace = true }
-paste = { workspace = true }
+pastey = { workspace = true }
 itertools = { workspace = true }
 num-complex = { workspace = true }
 thiserror = { workspace = true }

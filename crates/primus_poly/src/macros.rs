@@ -1,6 +1,6 @@
 macro_rules! impl_iters {
     ($poly:ident, $short_name:ident) => {
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!("Immutable chunked iterator over [`", stringify!($poly), "`] elements.")]
             #[derive(Debug, Clone)]
             pub struct [<$poly Iter>]<'a, T>
@@ -72,7 +72,7 @@ macro_rules! impl_iters {
             impl<'a, T: FheUint> core::iter::ExactSizeIterator for [<$poly Iter>]<'a, T> {}
         }
 
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!("Mutable chunked iterator over [`", stringify!($poly), "`] elements.")]
             #[derive(Debug)]
             pub struct [<$poly IterMut>]<'a, T>

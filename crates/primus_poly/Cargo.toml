@@ -14,7 +14,7 @@ primus_distr = { path = "../primus_distr" }
 num-traits = { workspace = true }
 rand = { workspace = true }
 itertools = { workspace = true }
-paste = { workspace = true }
+pastey = { workspace = true }
 num-complex = { workspace = true }
 
 [features]

@@ -152,7 +152,7 @@ macro_rules! impl_zero {
             S: DataOwned<Elem = T>,
             T: FheUint,
         {
-            paste::paste! {
+            pastey::paste! {
                 #[doc = concat!(r" Creates a new [`",stringify!($cipher),"<",stringify!(S),">`] with all values or coefficients equal to zero.")]
                 ///
                 /// # Correctness

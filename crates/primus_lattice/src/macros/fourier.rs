@@ -8,7 +8,7 @@
 /// types for a Fourier ciphertext over `Complex64` elements.
 macro_rules! impl_fourier_iters {
     ($cipher:ident) => {
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!(
                 "Immutable chunked iterator over [`",
                 stringify!($cipher),
@@ -66,7 +66,7 @@ macro_rules! impl_fourier_iters {
             }
         }
 
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!(
                 "Mutable chunked iterator over [`",
                 stringify!($cipher),
@@ -130,7 +130,7 @@ macro_rules! impl_fourier_iters {
 /// `set_zero`, `as_ref`, `as_mut`, `byte_count`) for a Fourier ciphertext.
 macro_rules! impl_fourier_core {
     ($cipher:ident) => {
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!("Owned [`", stringify!($cipher), "`] backed by a [`Vec`].")]
             pub type [<$cipher Owned>] = $cipher<Vec<num_complex::Complex64>>;
         }
@@ -157,7 +157,7 @@ macro_rules! impl_fourier_core {
         where
             S: primus_data::RawData<Elem = num_complex::Complex64> + primus_data::DataOwned,
         {
-            paste::paste! {
+            pastey::paste! {
                 #[doc = concat!("Creates a zero-initialized [`", stringify!($cipher), "`].")]
                 #[inline]
                 /// The length is the total number of complex Fourier values,
@@ -223,7 +223,7 @@ macro_rules! impl_fourier_core {
 /// - `$method`: the method name prefix (e.g., `fourier_poly` → `iter_fourier_poly`)
 macro_rules! impl_fourier_iter_sub {
     ($cipher:ident, $sub:ident, $sub_iter:ident, $sub_iter_mut:ident, $method:ident) => {
-        paste::paste! {
+        pastey::paste! {
             impl<S> $cipher<S>
             where
                 S: primus_data::RawData<Elem = num_complex::Complex64> + primus_data::Data,

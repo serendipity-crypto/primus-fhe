@@ -13,10 +13,10 @@ serde = { version = "1.0", features = ["derive"] }
 zeroize = "1.9"
 bytemuck = "1.25.0"
 clap = { version = "4.6", features = ["derive"] }
-paste = "1.0"
+pastey = "0.2.3"
 thiserror = "2"
 itertools = "0.15.0"
 rayon = "1.12"
 
 criterion = "0.8"
-comfy-table = "7.1"
+comfy-table = "8.0"

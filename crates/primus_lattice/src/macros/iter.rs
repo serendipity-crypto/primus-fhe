@@ -6,7 +6,7 @@
 
 macro_rules! impl_iters {
     ($cipher:ident) => {
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!("Immutable chunked iterator over [`", stringify!($cipher), "`] ciphertexts.")]
             pub struct [<$cipher Iter>]<'a, T>
             where
@@ -55,7 +55,7 @@ macro_rules! impl_iters {
             impl<'a, T: FheUint> core::iter::ExactSizeIterator for [<$cipher Iter>]<'a, T> {}
         }
 
-        paste::paste! {
+        pastey::paste! {
             #[doc = concat!("Mutable chunked iterator over [`", stringify!($cipher), "`] ciphertexts.")]
             pub struct [<$cipher IterMut>]<'a, T>
             where
@@ -108,7 +108,7 @@ macro_rules! impl_iters {
 
 macro_rules! impl_iter_sub_structure {
     ($cipher:ident, $sub:ident) => {
-        paste::paste! {
+        pastey::paste! {
             impl_iter_sub_structure!($cipher, $sub, [<$sub:snake>]);
         }
     };
@@ -118,7 +118,7 @@ macro_rules! impl_iter_sub_structure {
             S: Data<Elem = T>,
             T: FheUint,
         {
-            paste::paste! {
+            pastey::paste! {
                 #[doc = concat!("Returns an iterator over the [`", stringify!($sub), "`] sub-components of this `", stringify!($cipher), "`.")]
                 ///
                 ///
@@ -142,7 +142,7 @@ macro_rules! impl_iter_sub_structure {
             S: DataMut<Elem = T>,
             T: FheUint,
         {
-            paste::paste! {
+            pastey::paste! {
                 #[doc = concat!("Returns a mutable iterator over the [`", stringify!($sub), "`] sub-components of this `", stringify!($cipher), "`.")]
                 ///
                 ///

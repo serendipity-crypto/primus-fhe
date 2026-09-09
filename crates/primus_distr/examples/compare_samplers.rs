@@ -70,7 +70,7 @@ fn display_accuracy_table(sigma: f64, theoretical_probs: &[f64], all_stats: &[Sa
 
     let mut table = Table::new();
     table
-        .load_preset(UTF8_FULL)
+        .load_style(UTF8_FULL)
         .set_content_arrangement(ContentArrangement::Dynamic);
 
     table.set_header(vec![
@@ -151,7 +151,7 @@ fn display_probability_table(sigma: f64, theoretical_probs: &[f64], all_stats: &
 
     let mut table = Table::new();
     table
-        .load_preset(UTF8_FULL)
+        .load_style(UTF8_FULL)
         .set_content_arrangement(ContentArrangement::Dynamic);
     table.set_header(header);
 
