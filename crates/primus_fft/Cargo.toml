@@ -13,7 +13,6 @@ dyn-stack = "0.13.2"
 
 [dev-dependencies]
 criterion = { workspace = true }
-rand = { workspace = true }
 
 [[bench]]
 name = "fft"

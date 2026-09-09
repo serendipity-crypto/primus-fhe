@@ -15,7 +15,6 @@ thiserror = { workspace = true }
 itertools = { workspace = true }
 
 [dev-dependencies]
-rand = { workspace = true }
 criterion = { workspace = true }
 
 [features]
