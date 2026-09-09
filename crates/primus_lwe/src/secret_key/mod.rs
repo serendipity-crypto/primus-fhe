@@ -1,5 +1,6 @@
 //! Owned LWE keys and borrowed views over encoded or signed coefficients.
 
+mod batch;
 mod borrowed;
 mod owned;
 mod packed;

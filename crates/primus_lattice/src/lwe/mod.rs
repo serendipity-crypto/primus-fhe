@@ -2,8 +2,8 @@ mod extract;
 mod multiple_message;
 mod single_message;
 
-pub use multiple_message::MultiMsgLwe;
-pub use single_message::Lwe;
+pub use multiple_message::{MultiMsgLwe, MultiMsgLweIter, MultiMsgLweIterMut};
+pub use single_message::{Lwe, LweIter, LweIterMut};
 
 /// TFHE torus LWE ciphertext (coefficient domain).
 ///

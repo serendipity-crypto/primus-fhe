@@ -6,6 +6,7 @@ use rand::distr::Uniform;
 use crate::{RoundedCodec, SecretKeyDistr};
 
 /// Parameters and precomputed samplers for LWE with a nonzero vector dimension.
+/// The ciphertext length `dimension + 1` always fits in `usize`.
 #[derive(Clone)]
 pub struct LweParameters<T, M>
 where
@@ -38,7 +39,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if `dimension` is zero, the secret distribution is invalid for
+    /// Panics if `dimension` is zero or `dimension + 1` overflows `usize`,
+    /// the secret distribution is invalid for
     /// `dimension`, either Gaussian sampler fails the validity rules of
     /// [`DiscreteGaussian::new`],
     /// or the plaintext/ciphertext moduli fail the rules of
@@ -52,6 +54,7 @@ where
         noise_standard_deviation: f64,
     ) -> Self {
         assert!(dimension != 0, "LWE dimension must be non-zero");
+        dimension.checked_add(1).expect("LWE length overflow");
         secret_key_distr
             .validate_for_length(dimension)
             .expect("invalid LWE secret-key distribution");

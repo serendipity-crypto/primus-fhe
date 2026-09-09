@@ -31,6 +31,8 @@ NLev and NGSW share a storage shape but have different semantics: an NLev of `be
 
 Wrappers are generic over storage `S` using [`primus_data`](../primus_data/README.md). Operations require the appropriate read, mutable, or owned-storage capability. Borrowed wrappers operate directly on the caller's slices.
 
+`LweIter` / `LweIterMut` and `MultiMsgLweIter` / `MultiMsgLweIterMut` borrow complete chunks, like other ciphertext iterators. Their chunk lengths include the body; `Lwe::lwe_len()` returns this length. An incomplete tail is omitted, so batch operations must validate the complete buffer length before iteration. `MultiMsgLweIter` traverses packed containers, not the samples extracted from one shared mask.
+
 - Ordinary GLWE uses `(k+1)*N` elements; GLev uses `L*(k+1)*N`; GGSW uses `(k+1)*L*(k+1)*N`.
 - CRT stores each polynomial as `m` consecutive coefficient blocks of length `N`. DCRT has the same block structure in NTT form. Nested gadget order is `[row][level][component][modulus][coefficient/evaluation]`.
 - Fourier polynomials contain `N/2` complex entries in the selected backend's evaluation order. Ciphertexts use normalized torus transforms; polynomial multipliers must use the scale required by the multiplication API.

@@ -13,7 +13,12 @@ use super::LweSecretKeyRef;
 ///
 /// Secret coefficients are erased when the key (including each clone) is dropped.
 /// Message operations use [`LweParameters`] for encoding and sampling; use
-/// [`Self::as_view`] to borrow the coefficients for raw LWE operations.
+/// [`Self::as_view`] to borrow the coefficients for single-ciphertext raw operations.
+/// Batch operations, including raw encoded encryption and phase decryption,
+/// require this owned key, ensuring that reused single-ciphertext operations
+/// always receive encoded coefficients.
+/// Construction guarantees that the ciphertext length `dimension() + 1` fits
+/// in `usize`.
 ///
 /// # Correctness
 ///
@@ -63,8 +68,13 @@ impl<T: FheUint> LweSecretKey<T> {
     ///
     /// `key` must contain canonical residues for the modulus used in subsequent
     /// operations and satisfy `distr`. Neither condition is checked here.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `key.len() + 1` overflows `usize`.
     #[inline]
     pub fn new(key: Vec<T>, distr: SecretKeyDistr) -> Self {
+        key.len().checked_add(1).expect("LWE length overflow");
         Self { data: key, distr }
     }
 

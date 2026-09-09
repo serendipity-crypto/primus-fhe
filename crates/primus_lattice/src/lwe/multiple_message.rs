@@ -24,6 +24,7 @@ where
     <S as RawData>::Elem: FheUint;
 
 impl_common!(MultiMsgLwe);
+impl_iters!(MultiMsgLwe);
 impl_bytes_io!(MultiMsgLwe);
 
 impl_basic_operation_single_modulus!(MultiMsgLwe);

@@ -15,9 +15,30 @@
 //! ciphertext layout, so secret-key decryption and key switching also accept
 //! public-key ciphertexts. Its noise budget differs from secret-key encryption;
 //! see the public key's correctness contract before choosing parameters.
+//!
+//! Both keys provide `encrypt_batch` / `encrypt_batch_to` for independent
+//! samples in a contiguous `Vec<T>`. Explicit embedding variants also support
+//! centered messages. Batch output methods accept `&mut [T]`, and decryption
+//! accepts `&[T]`. Every chunk contains `dimension + 1` coefficients, including
+//! its body. Use [`primus_lattice::lwe::LweIter`] / `LweIterMut` to borrow samples.
+//! Secret-key batch operations, including raw `encrypt_encoded_batch` and
+//! `decrypt_phase_batch`, require [`LweSecretKey`] with encoded coefficients.
+//! [`LweSecretKeyRef`] supports single-ciphertext raw operations only; signed
+//! callers must encode and store a reusable key before batching.
+//! Batch operations validate the complete length before iteration.
+//! Empty batches consume no randomness. Batch sampling order need not match
+//! repeated single-message calls; public-key batching reuses rows across a small
+//! output tile. The separate packed multi-message methods retain their shared-mask layout.
+
+//!
+//! [`LweKeySwitchingKey::key_switch_batch_to`] uses the same contiguous layout,
+//! with separate input/output dimensions. It reuses each key entry across a small
+//! tile, needs no heap scratch, and produces exactly the same coefficients as
+//! repeated single-ciphertext key switching.
 
 #![deny(missing_docs)]
 
+mod batch;
 mod key_switch;
 mod parameter;
 mod public_key;

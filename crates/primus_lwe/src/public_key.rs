@@ -1,5 +1,7 @@
 //! Square-matrix LWE public-key encryption.
 
+mod batch;
+
 use primus_data::DataMut;
 use primus_distr::{DiscreteGaussian, SparseTernaryDistr};
 use primus_integer::FheUint;
@@ -79,9 +81,7 @@ impl<T: FheUint> LwePublicKey<T> {
             dimension,
             "LWE public-key dimension mismatch"
         );
-        let row_len = dimension
-            .checked_add(1)
-            .expect("LWE public-key row length overflow");
+        let row_len = dimension + 1;
         let length = dimension
             .checked_mul(row_len)
             .expect("LWE public-key storage length overflow");

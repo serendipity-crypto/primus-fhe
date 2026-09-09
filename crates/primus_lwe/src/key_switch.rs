@@ -6,6 +6,8 @@ use primus_reduce::RingContext;
 
 use crate::secret_key::encode_signed;
 
+mod batch;
+
 use crate::{LweParameters, LweSecretKey, LweSecretKeyRef};
 
 /// An LWE key-switching key from one secret-key vector to another.
@@ -66,9 +68,7 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
             "LWE key switching currently requires matching input and output ciphertext moduli"
         );
 
-        let output_lwe_len = output_dimension
-            .checked_add(1)
-            .expect("LWE key-switching output length overflow");
+        let output_lwe_len = output_dimension + 1;
         let coefficient_len = output_lwe_len
             .checked_mul(basis.decompose_length())
             .expect("LWE key-switching coefficient block length overflow");
@@ -194,51 +194,45 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
             "LWE key-switching modulus mismatch"
         );
 
-        // Accumulate -b + sum(digit * key_entry), then negate the result.
         output_mask.fill(T::ZERO);
-        *output_body = modulus.reduce_neg(input_body);
+        if modulus.explicit_value().is_none() {
+            // Native multiplication is cheap: accumulate (0, b) - sum(digit * entry).
+            *output_body = input_body;
+            self.key_switch_kernel::<true, _>(input_mask, output.as_mut(), modulus);
+        } else {
+            // Keep positive digit multiply-adds for explicit moduli; negating
+            // every general digit costs more than one final output negation.
+            *output_body = modulus.reduce_neg(input_body);
+            self.key_switch_kernel::<false, _>(input_mask, output.as_mut(), modulus);
+            output.neg_assign(modulus);
+        }
+    }
 
+    /// Accumulates mask contributions into an initialized output. Dimensions
+    /// and modulus have been checked by the public boundary.
+    fn key_switch_kernel<const NATIVE: bool, M: RingContext<T>>(
+        &self,
+        input_mask: &[T],
+        output: &mut [T],
+        modulus: M,
+    ) {
         let output_lwe_len = self.output_dimension + 1;
-        let coefficient_len = output_lwe_len * basis.decompose_length();
-        let negative_one = modulus.reduce_neg(T::ONE);
-        let negative_two = modulus.reduce_neg(T::TWO);
+        let coefficient_len = output_lwe_len * self.basis.decompose_length();
         for (&coefficient, block) in input_mask
             .iter()
             .zip(self.data.chunks_exact(coefficient_len))
         {
-            let (adjusted, mut carry) = basis.init_value_carry(coefficient);
-            for (decomposer, entry) in basis
+            let (adjusted, mut carry) = self.basis.init_value_carry(coefficient);
+            for (decomposer, entry) in self
+                .basis
                 .decomposer_iter()
                 .zip(block.chunks_exact(output_lwe_len))
             {
                 let (digit, next_carry) = decomposer.decompose(adjusted, carry);
                 carry = next_carry;
-                let key_entry = Lwe(entry);
-                if digit.is_zero() {
-                    continue;
-                }
-
-                // Signed decomposition produces small digits. Avoid an
-                // expensive modular multiply for the most common values;
-                // in particular, a base-four decomposition consists only of
-                // 0, 1, -1, and -2.
-                if digit == T::ONE {
-                    output.add_assign(&key_entry, modulus);
-                } else if digit == negative_one {
-                    output.sub_assign(&key_entry, modulus);
-                } else if digit == T::TWO {
-                    output.add_assign(&key_entry, modulus);
-                    output.add_assign(&key_entry, modulus);
-                } else if digit == negative_two {
-                    output.sub_assign(&key_entry, modulus);
-                    output.sub_assign(&key_entry, modulus);
-                } else {
-                    output.add_mul_scalar_assign(&key_entry, digit, modulus);
-                }
+                accumulate_entry::<NATIVE, _, _>(output, entry, digit, modulus);
             }
         }
-
-        output.neg_assign(modulus);
     }
 
     /// Key-switches `input` into a newly allocated ciphertext.
@@ -253,5 +247,36 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
         let mut output = Lwe::zero(self.output_dimension());
         self.key_switch_to(input, &mut output, modulus);
         output
+    }
+}
+
+/// Accumulates one key entry into a validated output. Native kernels subtract
+/// digit * entry directly. Explicit-modulus kernels accumulate its positive
+/// contribution and negate the complete output afterwards; this retains cheap
+/// additions/subtractions for small digits without negating general digits.
+#[inline]
+fn accumulate_entry<const NATIVE: bool, T: FheUint, M: RingContext<T>>(
+    output: &mut [T],
+    entry: &[T],
+    digit: T,
+    modulus: M,
+) {
+    if digit.is_zero() {
+        return;
+    }
+    if NATIVE {
+        modulus.reduce_add_mul_scalar_slice_assign(output, entry, modulus.reduce_neg(digit));
+    } else if digit == T::ONE {
+        modulus.reduce_add_slice_assign(output, entry);
+    } else if digit == modulus.reduce_neg(T::ONE) {
+        modulus.reduce_sub_slice_assign(output, entry);
+    } else if digit == T::TWO {
+        modulus.reduce_add_slice_assign(output, entry);
+        modulus.reduce_add_slice_assign(output, entry);
+    } else if digit == modulus.reduce_neg(T::TWO) {
+        modulus.reduce_sub_slice_assign(output, entry);
+        modulus.reduce_sub_slice_assign(output, entry);
+    } else {
+        modulus.reduce_add_mul_scalar_slice_assign(output, entry, digit);
     }
 }

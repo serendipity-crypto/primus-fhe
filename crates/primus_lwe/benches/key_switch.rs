@@ -1,24 +1,77 @@
 // cargo bench -p primus_lwe --bench key_switch
-// cargo +nightly bench -p primus_lwe --bench key_switch --features simd
+// Performance fixtures, not evaluated security parameters. See key_switch_results.md.
 
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use primus_decompose::primitive::ApproxSignedBasis;
-use primus_lattice::lwe::Lwe;
+use primus_lattice::lwe::{LweIter, LweIterMut};
 use primus_lwe::{
     LweKeySwitchingKey, LweParameters, LweSecretKey, LweSecretKeyRef, SecretKeyDistr,
 };
-use primus_modulus::BarrettModulus;
-use rand::distr::{Distribution, Uniform};
+use primus_modulus::{BarrettModulus, NativeModulus};
+use primus_reduce::RingContext;
+use rand::distr::Distribution;
 use rand::{SeedableRng, rngs::StdRng};
 
+fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) {
+    for log_basis in [2, 4] {
+        let mut rng = StdRng::seed_from_u64(0xdec0_005e);
+        let params = LweParameters::new(800, 4, modulus, SecretKeyDistr::UniformBinary, 0.7);
+        let secret = LweSecretKey::generate(&params, &mut rng);
+        let basis = ApproxSignedBasis::new(modulus.explicit_value(), log_basis, None);
+        let levels = basis.decompose_length();
+        let key = LweKeySwitchingKey::generate(
+            LweSecretKeyRef::Encoded(&[1; 1024]),
+            &secret,
+            &params,
+            basis,
+            &mut rng,
+        );
+        let input: Vec<u32> = params
+            .cipher_modulus_uniform_distr()
+            .sample_iter(&mut rng)
+            .take(1025 * 16)
+            .collect();
+        for count in [1, 16] {
+            let input = &input[..1025 * count];
+            let mut output = vec![0; 801 * count];
+            let mut group = c.benchmark_group(format!(
+                "lwe_key_switch/u32/{name}/n1024_to800/logB{log_basis}_L{levels}/count{count}"
+            ));
+            group.throughput(Throughput::Elements(count as u64));
+            group.bench_function("single_loop", |b| {
+                b.iter(|| {
+                    for (input, mut output) in LweIter::new(black_box(input), 1025)
+                        .zip(LweIterMut::new(black_box(&mut output), 801))
+                    {
+                        black_box(&key).key_switch_to(&input, &mut output, black_box(modulus));
+                    }
+                })
+            });
+            group.bench_function("batch_to", |b| {
+                b.iter(|| {
+                    black_box(&key).key_switch_batch_to(
+                        black_box(input),
+                        black_box(&mut output),
+                        black_box(modulus),
+                    );
+                })
+            });
+            group.finish();
+        }
+    }
+}
+fn key_switch(c: &mut Criterion) {
+    bench_domain(c, "native", NativeModulus::new());
+    bench_domain(c, "explicit", BarrettModulus::new(132_120_577));
+}
 const CIPHERTEXT_MODULUS: u32 = 132_120_577;
 const OUTPUT_DIMENSION: usize = 800;
 const LOG_BASIS: u32 = 2;
 const LEVEL_COUNT: usize = 13;
 
-fn bench_key_switch(c: &mut Criterion) {
+fn bench_generation(c: &mut Criterion) {
     let modulus = BarrettModulus::new(CIPHERTEXT_MODULUS);
     let output_parameters = LweParameters::new(
         OUTPUT_DIMENSION,
@@ -30,27 +83,11 @@ fn bench_key_switch(c: &mut Criterion) {
     let basis = ApproxSignedBasis::new(Some(CIPHERTEXT_MODULUS), LOG_BASIS, Some(LEVEL_COUNT));
     let mut rng = StdRng::seed_from_u64(0xdec0_005e);
     let output_secret_key = LweSecretKey::generate(&output_parameters, &mut rng);
-    let uniform = Uniform::new(0, CIPHERTEXT_MODULUS).unwrap();
-    let mut group = c.benchmark_group("lwe_key_switch/u32/explicit");
+    let mut group = c.benchmark_group("lwe_key_switch_generation/u32/explicit");
     group.sample_size(10);
 
     for input_dimension in [1024, 2048] {
         let input_secret_key = vec![1u32; input_dimension];
-        let key = LweKeySwitchingKey::generate(
-            LweSecretKeyRef::Encoded(&input_secret_key),
-            &output_secret_key,
-            &output_parameters,
-            basis.clone(),
-            &mut rng,
-        );
-        let mut input: Lwe<Vec<u32>> = Lwe::zero(input_dimension);
-        input
-            .0
-            .iter_mut()
-            .zip(uniform.sample_iter(&mut rng))
-            .for_each(|(output, sample)| *output = sample);
-        let mut output: Lwe<Vec<u32>> = Lwe::zero(OUTPUT_DIMENSION);
-
         group.bench_function(BenchmarkId::new("generate", input_dimension), |bencher| {
             bencher.iter(|| {
                 LweKeySwitchingKey::generate(
@@ -62,26 +99,9 @@ fn bench_key_switch(c: &mut Criterion) {
                 )
             });
         });
-
-        group.bench_with_input(
-            BenchmarkId::new(
-                format!("n{input_dimension}_to_n{OUTPUT_DIMENSION}"),
-                format!("logB{LOG_BASIS}_L{LEVEL_COUNT}"),
-            ),
-            &input_dimension,
-            |bencher, _| {
-                bencher.iter(|| {
-                    key.key_switch_to(
-                        black_box(&input),
-                        black_box(&mut output),
-                        black_box(modulus),
-                    );
-                });
-            },
-        );
     }
     group.finish();
 }
 
-criterion_group!(benches, bench_key_switch);
+criterion_group!(benches, key_switch, bench_generation);
 criterion_main!(benches);

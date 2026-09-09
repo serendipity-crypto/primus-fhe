@@ -20,6 +20,7 @@ where
     <S as RawData>::Elem: FheUint;
 
 impl_common!(Lwe);
+impl_iters!(Lwe);
 impl_bytes_io!(Lwe);
 
 impl_basic_operation_single_modulus!(Lwe);
@@ -132,6 +133,15 @@ where
     #[inline]
     pub fn dimension(&self) -> usize {
         self.0.len() - 1
+    }
+
+    /// Returns the stored coefficient count, including the body.
+    /// For a valid ciphertext this is `dimension() + 1`, suitable for
+    /// [`super::LweIter::new`] and [`super::LweIterMut::new`].
+    #[must_use]
+    #[inline]
+    pub fn lwe_len(&self) -> usize {
+        self.0.len()
     }
 }
 

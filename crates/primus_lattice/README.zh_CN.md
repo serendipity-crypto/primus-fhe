@@ -31,6 +31,8 @@ NLev 与 NGSW 的存储形状相同，但语义不同：`beta` 的 NLev 各层�
 
 密文包装类型以存储 `S` 为泛型，通过 [`primus_data`](../primus_data/README.zh_CN.md) 访问数据。各运算要求相应的只读、可变或拥有存储能力。借用形式直接操作调用方的切片。
 
+`LweIter` / `LweIterMut` 和 `MultiMsgLweIter` / `MultiMsgLweIterMut` 与其他密文迭代器一样借用完整分块。分块长度包含 body，`Lwe::lwe_len()` 返回该长度。不完整的尾部会被忽略，因此 batch 操作必须在迭代前检查完整缓冲区长度。`MultiMsgLweIter` 遍历打包容器，而不是从单个共享 mask 中抽取样本。
+
 - 普通 GLWE 占 `(k+1)*N` 个元素，GLev 占 `L*(k+1)*N`，GGSW 占 `(k+1)*L*(k+1)*N`。
 - CRT 的每个多项式由 `m` 个连续的长度为 `N` 的系数块组成。DCRT 保持相同的分块结构，但块内为 NTT 数据。嵌套 gadget 顺序为 `[row][level][component][modulus][coefficient/evaluation]`。
 - Fourier 多项式包含 `N/2` 个复数元素，顺序由后端定义。密文使用归一化 torus 变换；参与乘法的多项式必须使用对应接口要求的缩放。
