@@ -51,7 +51,7 @@ impl_as_cast! {u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize}
 
 /// An `as`-style conversion from `T` into `Self`.
 ///
-/// Unlike [`From`](core::convert::From), this conversion may lose information.
+/// Unlike [`From`], this conversion may lose information.
 /// Primitive implementations have exactly the same behavior as Rust's `as`
 /// operator for the corresponding source and destination types.
 pub trait AsFrom<T: Copy>: Copy {
@@ -62,7 +62,7 @@ pub trait AsFrom<T: Copy>: Copy {
 
 /// An `as`-style conversion from `Self` into `T`.
 ///
-/// Unlike [`Into`](core::convert::Into), this conversion may lose information.
+/// Unlike [`Into`], this conversion may lose information.
 /// It is provided automatically whenever `T` implements [`AsFrom<Self>`], so new
 /// conversions should be defined by implementing [`AsFrom`] rather than this trait.
 pub trait AsInto<T: Copy>: Copy {
