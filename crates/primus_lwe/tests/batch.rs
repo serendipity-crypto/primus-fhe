@@ -9,10 +9,10 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 #[test]
 fn public_batch_matches_independent_matrix_arithmetic() {
     use rand::distr::Distribution;
-    fn check<M: RingContext<u32>>(modulus: M) {
+    fn check<M: RingContext<u32>>(modulus: M, noise_sigma: f64) {
         let q = modulus.explicit_value().map_or(1i128 << 32, i128::from);
         let signed = [-1i128, 0, 1, 2, -2, 1, -1];
-        let params = LweParameters::new(7, 4, modulus, SecretKeyDistr::gaussian(2.0), 3.2);
+        let params = LweParameters::new(7, 4, modulus, SecretKeyDistr::gaussian(2.0), noise_sigma);
         let secret = LweSecretKey::new(
             signed.iter().map(|s| s.rem_euclid(q) as u32).collect(),
             SecretKeyDistr::gaussian(2.0),
@@ -57,13 +57,16 @@ fn public_batch_matches_independent_matrix_arithmetic() {
         }
         assert_eq!(rng.next_u64(), oracle_rng.next_u64());
     }
-    check(NativeModulus::new());
-    check(BarrettModulus::new(132_120_577));
+    for noise_sigma in [3.2, 30.0] {
+        check(NativeModulus::new(), noise_sigma);
+        check(BarrettModulus::new(132_120_577), noise_sigma);
+    }
 }
 
-fn check_batches<T: FheUint, M: RingContext<T>>(modulus: M) {
+fn check_batches<T: FheUint, M: RingContext<T>>(modulus: M, dimension: usize) {
+    let lwe_len = dimension + 1;
     let params = LweParameters::new(
-        7,
+        dimension,
         T::as_from(4u32),
         modulus,
         SecretKeyDistr::UniformTernary,
@@ -78,8 +81,8 @@ fn check_batches<T: FheUint, M: RingContext<T>>(modulus: M) {
             for use_public in [false, true] {
                 let mut rng = StdRng::seed_from_u64(0x1_ee22);
                 let mut raw_rng = StdRng::seed_from_u64(0x1_ee22);
-                let mut storage = vec![T::MAX; count * 8 + 2];
-                let batch = &mut storage[1..count * 8 + 1];
+                let mut storage = vec![T::MAX; count * lwe_len + 2];
+                let batch = &mut storage[1..count * lwe_len + 1];
                 if use_public {
                     public.encrypt_batch_with_embedding_to(
                         &messages, batch, &params, &mut rng, embedding,
@@ -117,7 +120,7 @@ fn check_batches<T: FheUint, M: RingContext<T>>(modulus: M) {
                 let phases = secret.decrypt_phase_batch(batch, modulus);
                 secret.decrypt_phase_batch_to(batch, &mut decrypted, modulus);
                 assert_eq!(decrypted, phases);
-                for (ciphertext, &phase) in LweIter::new(batch, 8).zip(&phases) {
+                for (ciphertext, &phase) in LweIter::new(batch, lwe_len).zip(&phases) {
                     assert_eq!(secret.as_view().decrypt_phase(&ciphertext, modulus), phase);
                     assert!(
                         ciphertext
@@ -127,7 +130,7 @@ fn check_batches<T: FheUint, M: RingContext<T>>(modulus: M) {
                     );
                 }
                 assert_eq!(storage[0], T::MAX);
-                assert_eq!(storage[count * 8 + 1], T::MAX);
+                assert_eq!(storage[count * lwe_len + 1], T::MAX);
                 if count == 0 {
                     let mut untouched = StdRng::seed_from_u64(0x1_ee22);
                     assert_eq!(rng.next_u64(), untouched.next_u64());
@@ -139,11 +142,14 @@ fn check_batches<T: FheUint, M: RingContext<T>>(modulus: M) {
 
 #[test]
 fn batches_decrypt_across_moduli_embeddings_and_tail_sizes() {
-    check_batches(NativeModulus::<u32>::new());
-    check_batches(NativeModulus::<u64>::new());
-    check_batches(PowOf2Modulus::new(1u32 << 30));
-    check_batches(BarrettModulus::new(132_120_577u32));
-    check_batches(BarrettModulus::new(1_125_899_906_826_241u64));
+    check_batches(NativeModulus::<u32>::new(), 7);
+    check_batches(NativeModulus::<u64>::new(), 7);
+    check_batches(PowOf2Modulus::new(1u32 << 30), 7);
+    check_batches(BarrettModulus::new(132_120_577u32), 7);
+    check_batches(BarrettModulus::new(1_125_899_906_826_241u64), 7);
+    // A longer non-power-of-two mask exercises multiple vector blocks and a tail.
+    check_batches(NativeModulus::<u32>::new(), 805);
+    check_batches(BarrettModulus::new(132_120_577u32), 805);
 }
 
 #[test]

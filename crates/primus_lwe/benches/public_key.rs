@@ -9,8 +9,8 @@ use primus_reduce::RingContext;
 use rand::{SeedableRng, rngs::StdRng};
 use std::hint::black_box;
 
-// One dimension tracks key-generation cost; encryption below covers both
-// key sizes without repeating generation measurements at every batch count.
+// One dimension tracks key-generation cost; encryption below varies key sizes
+// without repeating generation measurements at every batch count.
 fn bench_generation<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) {
     let dimension = 1024;
     let mut rng = StdRng::seed_from_u64(0x1_ee15);
@@ -25,15 +25,25 @@ fn bench_generation<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus:
 }
 
 fn bench_batch_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M) {
-    for (dimension, count) in [(512, 1), (512, 64), (1024, 64)] {
+    // Cover both Gaussian backends; CDT also tracks matrix-size scaling and
+    // a non-power-of-two dimension without duplicating those cases for Ziggurat.
+    for (sigma, dimension, count) in [
+        (3.2, 512, 1),
+        (3.2, 512, 64),
+        (3.2, 805, 64),
+        (3.2, 1024, 64),
+        (30.0, 512, 1),
+        (30.0, 512, 64),
+    ] {
         let mut rng = StdRng::seed_from_u64(0x1_ee25);
-        let params = LweParameters::new(dimension, 4, modulus, SecretKeyDistr::UniformBinary, 3.2);
+        let params =
+            LweParameters::new(dimension, 4, modulus, SecretKeyDistr::UniformBinary, sigma);
         let secret = LweSecretKey::generate(&params, &mut rng);
         let public = LwePublicKey::generate(&secret, &params, &mut rng);
         let messages = vec![1u32; count];
         let mut output = vec![0u32; (dimension + 1) * count];
         let mut group = c.benchmark_group(format!(
-            "lwe_public_key/u32/{name}/n{dimension}/count{count}"
+            "lwe_public_key/u32/{name}/sigma{sigma}/n{dimension}/count{count}"
         ));
         group.throughput(Throughput::Elements(count as u64));
         // One iteration encrypts exactly count independent messages; both cases

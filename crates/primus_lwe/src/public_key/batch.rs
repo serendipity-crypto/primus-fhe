@@ -230,9 +230,7 @@ impl<T: FheUint> LwePublicKey<T> {
         let row_len = self.dimension + 1;
         for mut ciphertext in LweIterMut::new(tile, row_len) {
             let (mask, body) = ciphertext.a_b_mut();
-            mask.iter_mut()
-                .zip(noise.sample_iter(&mut *rng))
-                .for_each(|(a, e)| *a = e);
+            noise.sample_to(mask, rng);
             modulus.reduce_add_assign(body, noise.sample(rng));
         }
         let ephemeral = SparseTernaryDistr::<i8>::new(-1);

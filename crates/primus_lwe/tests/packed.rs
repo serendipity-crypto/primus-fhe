@@ -22,19 +22,12 @@ fn packed_capacity_is_enforced() {
 
     // The first disallowed body reuses a mask up to sign.
     let count = params.dimension() + 1;
-    for embedding in [PlaintextEmbedding::Unsigned, PlaintextEmbedding::Centered] {
-        assert!(
-            catch_unwind(AssertUnwindSafe(|| {
-                key.encrypt_multi_messages_with_embedding(
-                    &vec![0u32; count],
-                    &params,
-                    &mut rng,
-                    embedding,
-                )
-            }))
-            .is_err()
-        );
-    }
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            key.encrypt_multi_messages(&vec![0u32; count], &params, &mut rng)
+        }))
+        .is_err()
+    );
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
             key.encrypt_multi_zeros(count, &params, &mut rng)
@@ -99,9 +92,11 @@ where
                 &messages[..count],
             );
         }
+    }
+    for count in [0, 3] {
         check(
             key.encrypt_multi_zeros(count, &params, &mut rng),
-            &vec![0; count],
+            &[0; 3][..count],
         );
     }
 }

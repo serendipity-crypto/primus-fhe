@@ -15,13 +15,20 @@ fn check_equations<T: FheUint, M: RingContext<T>>(modulus: M) {
     let q = modulus
         .explicit_value()
         .map_or(1i128 << T::BITS, |q| q.as_into());
-    for (dimension, distribution) in [
-        (1, SecretKeyDistr::UniformBinary),
-        (7, SecretKeyDistr::UniformTernary),
-        (257, SecretKeyDistr::gaussian(2.0)),
+    for (dimension, distribution, noise_sigma) in [
+        (1, SecretKeyDistr::UniformBinary, 3.2),
+        (7, SecretKeyDistr::UniformTernary, 3.2),
+        (805, SecretKeyDistr::gaussian(2.0), 3.2),
+        (7, SecretKeyDistr::UniformTernary, 30.0),
     ] {
-        // Tiny dimensions and noise are arithmetic fixtures, not security parameters.
-        let params = LweParameters::new(dimension, T::as_from(4u32), modulus, distribution, 3.2);
+        // These are arithmetic fixtures, not evaluated security parameters.
+        let params = LweParameters::new(
+            dimension,
+            T::as_from(4u32),
+            modulus,
+            distribution,
+            noise_sigma,
+        );
         let mut key_rng = StdRng::seed_from_u64(0x1_ee10);
         let secret = LweSecretKey::generate(&params, &mut key_rng);
         let signed_secret: Vec<i128> = secret

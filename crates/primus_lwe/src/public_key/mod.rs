@@ -318,10 +318,7 @@ impl<T: FheUint> LwePublicKey<T> {
         M: RingContext<T>,
         R: rand::Rng + rand::CryptoRng,
     {
-        output
-            .iter_mut()
-            .zip(noise.sample_iter(&mut *rng))
-            .for_each(|(out, sample)| *out = sample);
+        noise.sample_to(output, rng);
         modulus.reduce_add_assign(&mut output[self.dimension], plaintext);
         let ephemeral = SparseTernaryDistr::<i8>::new(-1);
         for row in self.data.chunks_exact(self.dimension + 1) {
