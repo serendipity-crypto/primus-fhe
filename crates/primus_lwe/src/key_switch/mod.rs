@@ -1,10 +1,8 @@
 use primus_data::{Data, DataMut};
 use primus_decompose::primitive::ApproxSignedBasis;
-use primus_integer::{FheUint, SignedInteger};
+use primus_integer::FheUint;
 use primus_lattice::lwe::Lwe;
 use primus_reduce::RingContext;
-
-use crate::secret_key::encode_signed;
 
 mod batch;
 
@@ -99,27 +97,19 @@ impl<T: FheUint> LweKeySwitchingKey<T> {
                 );
             }
         };
-        // Select representation and modulus shape once, outside both loops.
+        // Select key representation once; the concrete modulus handles signed encoding.
         match input_secret_key {
             LweSecretKeyRef::Encoded(coefficients) => coefficients
                 .iter()
                 .copied()
                 .zip(blocks)
                 .for_each(encrypt_levels),
-            LweSecretKeyRef::Signed(coefficients) => match modulus.explicit_value() {
-                Some(q) => coefficients
-                    .iter()
-                    .copied()
-                    .map(|coefficient| encode_signed(coefficient, q))
-                    .zip(blocks)
-                    .for_each(encrypt_levels),
-                None => coefficients
-                    .iter()
-                    .copied()
-                    .map(SignedInteger::cast_to_unsigned)
-                    .zip(blocks)
-                    .for_each(encrypt_levels),
-            },
+            LweSecretKeyRef::Signed(coefficients) => coefficients
+                .iter()
+                .copied()
+                .map(|coefficient| modulus.encode_signed(coefficient))
+                .zip(blocks)
+                .for_each(encrypt_levels),
         }
 
         Self {

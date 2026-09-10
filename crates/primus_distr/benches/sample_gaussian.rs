@@ -7,7 +7,7 @@
 
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use primus_distr::{CDTSampler, DiscreteZiggurat};
 use rand::distr::Distribution;
 
@@ -19,7 +19,8 @@ const MODULUS_MINUS_ONE: u64 = 1125899906826241 - 1;
 const TAIL_CUT: f64 = 12.0;
 
 fn bench_sample(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Sample");
+    let mut group = c.benchmark_group("gaussian_backend_sample");
+    group.throughput(Throughput::Elements(N as u64));
 
     for sigma in [1.0, 3.19, 10.0, 20.0, 30.0] {
         if sigma <= 20.0 {

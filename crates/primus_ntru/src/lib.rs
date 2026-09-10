@@ -3,6 +3,13 @@
 //! The scalar ciphertext invariant is
 //! `c = f^(-1) * (e + Delta * m)`.  Coefficient-domain parameters and
 //! secret keys are shared by the exact NTT and native-torus Fourier backends.
+//!
+//! Explicit-modulus conversions use bounded signed encoding: every secret
+//! coefficient must have unsigned magnitude strictly less than the target
+//! ciphertext modulus. [`NtruParameters`] checks this for its sampling support.
+//! Callers importing coefficient keys or selecting a different target modulus
+//! must establish the same bound; conversion does not perform general reduction.
+//! The native Fourier representation accepts every signed coefficient.
 
 #![deny(missing_docs)]
 

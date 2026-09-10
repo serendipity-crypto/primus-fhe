@@ -1,8 +1,20 @@
 use primus_gcd::Xgcd;
-use primus_integer::UnsignedInteger;
+use primus_integer::{FheUint, SignedInteger, UnsignedInteger};
 use primus_reduce::{ReduceError, prelude::*};
 
 use super::PowOf2Modulus;
+
+impl<T: FheUint> EncodeSigned<T> for PowOf2Modulus<T> {
+    #[inline(always)]
+    fn encode_signed(self, value: T::SignedInteger) -> T {
+        debug_assert!(
+            value.unsigned_abs() <= self.mask,
+            "signed coefficient magnitude must be less than the modulus"
+        );
+        // The low bits of two's complement already encode the residue modulo 2^k.
+        value.cast_to_unsigned() & self.mask
+    }
+}
 
 impl<T: UnsignedInteger> Reduce<T> for PowOf2Modulus<T> {
     type Output = T;

@@ -60,6 +60,51 @@ impl<T: FheInt + SignedInteger> SignedDiscreteGaussian<T> {
             SignedDiscreteGaussian::Ziggurat(sampler) => sampler.std_dev(),
         }
     }
+
+    /// Returns the inclusive maximum coefficient magnitude in the truncated
+    /// support, including when constructed from a backend with a custom tail cut.
+    #[must_use]
+    #[inline]
+    pub fn maximum_magnitude(&self) -> u64 {
+        match self {
+            Self::Cdt(sampler) => sampler.maximum_magnitude(),
+            Self::Ziggurat(sampler) => sampler.maximum_magnitude(),
+        }
+    }
+
+    /// Samples `length` signed coefficients into a newly allocated vector.
+    /// Selects the backend once and initializes the vector directly from samples.
+    /// Produces the same samples and consumes the same randomness as repeated
+    /// scalar [`Distribution::sample`] calls; an empty vector consumes none.
+    #[must_use]
+    #[inline]
+    pub fn sample_vec<R: rand::Rng + rand::CryptoRng + ?Sized>(
+        &self,
+        length: usize,
+        rng: &mut R,
+    ) -> Vec<T> {
+        match self {
+            Self::Cdt(sampler) => (0..length).map(|_| sampler.sample(rng)).collect(),
+            Self::Ziggurat(sampler) => (0..length).map(|_| sampler.sample(rng)).collect(),
+        }
+    }
+
+    /// Overwrites `output` with signed coefficients without allocating.
+    /// Selects the backend once, before the coefficient loop. Samples and RNG
+    /// consumption match repeated scalar [`Distribution::sample`] calls;
+    /// an empty slice consumes no randomness. A panicking RNG may leave
+    /// partially written output.
+    #[inline]
+    pub fn sample_to<R: rand::Rng + rand::CryptoRng + ?Sized>(
+        &self,
+        output: &mut [T],
+        rng: &mut R,
+    ) {
+        match self {
+            Self::Cdt(sampler) => crate::gaussian_core::sample_to(output, sampler, rng),
+            Self::Ziggurat(sampler) => crate::gaussian_core::sample_to(output, sampler, rng),
+        }
+    }
 }
 
 impl<T: FheInt + SignedInteger> Distribution<T> for SignedDiscreteGaussian<T> {

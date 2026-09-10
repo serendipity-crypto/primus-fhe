@@ -51,6 +51,7 @@ The expansion provides:
 
 - associated `value()` and `ratio()` functions;
 - `primus_reduce` scalar, slice, lazy-reduction, inverse, exponentiation, fused-operation, and dot-product implementations;
+- `EncodeSigned`, using the same bounded coefficient conversion as `UintModulus` with a compile-time modulus;
 - `Copy`, `Clone`, `PartialEq`, `Eq`, `Debug`, and `Hash` implementations.
 
 Do not derive those standard traits separately on the same struct, because the generated implementations would conflict.

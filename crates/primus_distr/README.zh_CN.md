@@ -21,15 +21,53 @@ CRT 批量布局以及统计诊断。
 | `CDTSampler<T>` / `SignedCDTSampler<T>` | 显式选择的 portable 64-bit cumulative-distribution-table backend |
 | `DiscreteZiggurat<T>` / `SignedDiscreteZiggurat<T>` | 用于较大 support 的显式离散 Ziggurat backend |
 
-所有 sampler 类型均实现 `rand::distr::Distribution`。批量 helper 要求 RNG 同时实现
+上表中的标量 sampler 类型均实现 `rand::distr::Distribution`。批量 helper 要求 RNG 同时实现
 `rand::Rng` 与 `rand::CryptoRng`。
 
 ## 私钥分布参数
 
 `SecretKeyDistr` 描述 binary、ternary、固定权重和 Gaussian 私钥系数分布；它是参数
-枚举，不是 sampler。`validate_for_length` 针对完整逻辑密钥检查概率与权重，失败时返回
-`SecretKeyDistrError`。Gaussian 参数由所选 Gaussian sampler 的构造器检查。
+枚举，不是 sampler。构造函数检查概率与完整逻辑密钥的权重。
+Gaussian 参数由所选 Gaussian sampler 的构造器检查。
 每种密码方案自行决定支持哪些分布变体。
+
+自定义概率使用 `SecretKeyDistr::binary(one_probability)` 或
+`SecretKeyDistr::ternary(negative_one_probability, one_probability)` 构造；
+构造时检查各概率有限且位于 `[0, 1]`，三元概率之和不超过一。
+`SecretKeyDistr::gaussian(standard_deviation)` 构造带命名字段的
+`Gaussian { standard_deviation }`，参数校验仍由 Gaussian sampler 完成。
+无参数变体直接使用枚举值。完整私钥采样器在构造时也检查概率，以覆盖直接构造枚举变体的情况。
+
+固定重量构造函数区分总重量和固定组成：
+
+| 构造函数 | 分布 |
+| --- | --- |
+| `fixed_hamming_weight_binary(length, weight)` | 均匀选取位置，恰好包含 `weight` 个 `1` |
+| `fixed_hamming_weight_ternary(length, weight)` | 恰好包含 `weight` 个非零位置，各符号独立均匀随机 |
+| `fixed_composition_ternary(length, negative_weight, positive_weight)` | 分别固定负一和正一的数量 |
+
+构造时拒绝超过完整逻辑私钥长度的重量及重量和溢出。
+长度不保存在枚举中，且仍可直接构造枚举变体，因此采样入口继续校验实际输出长度。
+
+`EncodedSecretKeySampler<T>::new(distribution, modulus_minus_one)` 和
+`SignedSecretKeySampler<S>::new(distribution)` 准备完整私钥的采样操作，
+持有与分布匹配的 Gaussian 表及 binary/ternary 概率阈值，并提供 `distr()`、`sample(length, rng)`
+和 `sample_to(output, rng)`。后者无分配地覆盖调用方存储。固定重量作用于完整输出，
+非法输出长度在写入或采样前拒绝。这两个完整私钥采样器不实现标量 `Distribution`，
+因为固定重量会关联不同系数。LWE/NTRU 参数持有采样器以复用预计算；GLWE 系数私钥生成
+根据分布描述准备采样器。
+
+`SignedSecretKeySampler::maximum_magnitude()` 返回样本幅度的无符号上界（包含端点）。
+参数层可在使用有界 Signed 编码前，一次性验证它小于目标模数。
+Gaussian 使用截断支持上界；binary 和 ternary 保守返回一。
+底层 `SignedDiscreteGaussian::maximum_magnitude()` 也保留显式后端的自定义 tail cut。
+两个采样器均不保存密文模数。
+
+自定义概率和固定重量的 binary/ternary 向量 helper 也提供 `_to` 版本。
+Encoded 采样器直接生成模数表示，不先分配 Signed 向量。
+采样算法可能改变不同版本间的 RNG 消费顺序和固定 seed 的输出；
+空输出并非一概保证不消耗随机数。自定义三元采样将各概率向下量化为 `2^-64` 的整数倍，
+将总非零概率限制在一以内以处理浮点边界舍入。
 
 ## 示例
 
@@ -70,6 +108,12 @@ backend；否则选择 Ziggurat backend。需要直接指定 tail cut 或 backen
 零和负值。
 
 ## 批量采样
+
+`DiscreteGaussian` 和 `SignedDiscreteGaussian` 提供 `sample_vec(length, rng)` 与
+`sample_to(output, rng)`，每批仅选择一次后端。前者直接由采样值初始化新向量；
+后者无分配地覆盖调用方存储。两者的输出和 RNG 消费量与反复调用标量
+`Distribution::sample` 一致，空批次不消耗随机数。现有 `sample_gaussian_values*`
+函数转发到这些方法。标量 `sample(rng)` 继续由 `Distribution` 提供。
 
 本 crate 同时提供返回新分配 `Vec` 的函数和写入调用方 slice 的对应 `_to` 函数。除
 uniform binary、sparse ternary 和 uniform ternary 外，还提供显式概率、固定 Hamming
@@ -124,6 +168,7 @@ cargo test -p primus_distr --features high_precision
 cargo test -p primus_distr
 cargo bench -p primus_distr --bench gen_sampler
 cargo bench -p primus_distr --bench sample_gaussian
+cargo bench -p primus_distr --bench sample_secret_key
 ```
 
 ## 许可证

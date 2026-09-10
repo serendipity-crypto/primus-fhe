@@ -1,8 +1,15 @@
 use primus_gcd::Xgcd;
-use primus_integer::UnsignedInteger;
+use primus_integer::{FheUint, SignedInteger, UnsignedInteger};
 use primus_reduce::{ReduceError, prelude::*};
 
 use super::NativeModulus;
+
+impl<T: FheUint> EncodeSigned<T> for NativeModulus<T> {
+    #[inline(always)]
+    fn encode_signed(self, value: T::SignedInteger) -> T {
+        value.cast_to_unsigned()
+    }
+}
 
 impl<T: UnsignedInteger> Reduce<T> for NativeModulus<T> {
     type Output = T;

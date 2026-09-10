@@ -1,7 +1,7 @@
 //! Parameters shared by the NTT and Fourier NTRU backends.
 
 use primus_decompose::{ApproxSignedBasisError, primitive::ApproxSignedBasis};
-use primus_distr::{DiscreteGaussian, SignedDiscreteGaussian};
+use primus_distr::{DiscreteGaussian, SignedSecretKeySampler};
 use primus_encoding::ScaledCodec;
 use primus_integer::FheUint;
 use primus_lattice::{MAX_POLY_LENGTH, MIN_POLY_LENGTH};
@@ -26,8 +26,7 @@ where
 {
     poly_length: usize,
     cipher_modulus: M,
-    secret_key_distr: SecretKeyDistr,
-    secret_key_distribution: Option<SignedDiscreteGaussian<T::SignedInteger>>,
+    secret_key_sampler: SignedSecretKeySampler<T::SignedInteger>,
     noise_distribution: DiscreteGaussian<T>,
     plaintext_codec: ScaledCodec<T>,
 }
@@ -46,7 +45,9 @@ where
     ///
     /// Panics if the polynomial length, plaintext modulus, ciphertext modulus,
     /// or Gaussian parameters are invalid, including failure of
-    /// [`ScaledCodec::new`]'s fixed-scale recovery bound.
+    /// [`ScaledCodec::new`]'s fixed-scale recovery bound, or if the secret-key
+    /// sampler's maximum magnitude is not strictly less than an explicit
+    /// ciphertext modulus.
     pub fn new(
         poly_length: usize,
         plain_modulus: T,
@@ -59,27 +60,21 @@ where
                 && poly_length.is_power_of_two(),
             "NTRU polynomial length must be a supported power of two"
         );
-        secret_key_distr
-            .validate_for_length(poly_length)
-            .expect("invalid NTRU secret-key distribution");
 
         let plaintext_codec = ScaledCodec::new(plain_modulus, cipher_modulus.explicit_value());
         let modulus_minus_one = cipher_modulus.minus_one();
         let noise_distribution = DiscreteGaussian::new(noise_standard_deviation, modulus_minus_one)
             .expect("invalid Gaussian NTRU noise distribution");
-        let secret_key_distribution = match secret_key_distr {
-            SecretKeyDistr::Gaussian(standard_deviation) => Some(
-                SignedDiscreteGaussian::new(standard_deviation)
-                    .expect("invalid Gaussian NTRU secret-key distribution"),
-            ),
-            _ => None,
-        };
+        let secret_key_sampler = SignedSecretKeySampler::new(secret_key_distr);
+        assert!(
+            secret_key_sampler.maximum_magnitude() <= modulus_minus_one,
+            "NTRU secret-key magnitude bound must be less than the ciphertext modulus"
+        );
 
         Self {
             poly_length,
             cipher_modulus,
-            secret_key_distr,
-            secret_key_distribution,
+            secret_key_sampler,
             noise_distribution,
             plaintext_codec,
         }
@@ -118,15 +113,13 @@ where
     /// Returns the coefficient distribution of `f`.
     #[inline]
     pub fn secret_key_distr(&self) -> SecretKeyDistr {
-        self.secret_key_distr
+        self.secret_key_sampler.distr()
     }
 
-    /// Returns the signed Gaussian key distribution, when configured.
+    /// Returns the prepared coefficient-key sampler.
     #[inline]
-    pub(crate) fn secret_key_distribution(
-        &self,
-    ) -> Option<&SignedDiscreteGaussian<T::SignedInteger>> {
-        self.secret_key_distribution.as_ref()
+    pub(crate) fn secret_key_sampler(&self) -> &SignedSecretKeySampler<T::SignedInteger> {
+        &self.secret_key_sampler
     }
 
     /// Returns the error distribution used for fresh ciphertexts.

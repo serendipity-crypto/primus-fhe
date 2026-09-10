@@ -51,6 +51,7 @@ pub struct CiphertextModulus;
 
 - 关联函数 `value()` 和 `ratio()`；
 - `primus_reduce` 的标量、切片、惰性约简、逆元、幂运算、融合运算和点积实现；
+- `EncodeSigned`，使用与 `UintModulus` 相同的有界系数转换，并传入编译期常量模数；
 - `Copy`、`Clone`、`PartialEq`、`Eq`、`Debug` 和 `Hash` 实现。
 
 不要在同一个 struct 上再次 derive 这些标准 trait，否则会与宏生成的实现冲突。

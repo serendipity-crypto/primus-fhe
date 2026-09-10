@@ -55,6 +55,37 @@ assert_eq!(values, [13, 13]);
 
 `FieldContext` 表示某个模数类型实现了列出的运算集合。它不证明模数为素数，也不保证每个非零剩余类都可逆。调用方仍须验证自身算法所需的代数条件。
 
+## 有符号系数
+
+`EncodeSigned<T>` 将有界 signed 系数转换为规范剩余类，不进行明文缩放或通用模约简。
+`primus_modulus` 中的具体模数类型分别实现此 trait，可从 crate 根或 `prelude` 导入。
+它不要求模数实现 `Reduce` 或 `ReduceNeg`。自定义模数类型需实现 `encode_signed`；
+默认切片方法统一检查一次等长，再静态调用对应的标量实现。
+
+`RingContext<T>` 包含 `EncodeSigned<T>`，`FieldContext<T>` 通过 `RingContext<T>` 继承此能力。
+使用任一 context 的泛型代码均可直接调用编码方法，无需额外的 trait 约束或导入。
+两个 context 均要求 `T: FheUint`；只需要有符号转换时，仍可单独使用 `EncodeSigned<T>`。
+
+```rust
+use primus_modulus::{NativeModulus, UintModulus};
+use primus_reduce::prelude::*;
+
+assert_eq!(UintModulus::new(97u64).encode_signed(-1), 96);
+assert_eq!(NativeModulus::<u64>::new().encode_signed(-1), u64::MAX);
+let mut output = [0u64; 3];
+UintModulus::new(97).encode_signed_slice_to(&[-1, 0, 1], &mut output);
+assert_eq!(output, [96, 0, 1]);
+```
+
+显式模数 `q` 下，每个系数必须满足 `value.unsigned_abs() < q`。
+这是正确性前提，不会在 release 模式额外扫描检查；Native 模数接受所有 signed 值。
+两个方法均支持 signed 最小值，不对 signed 值直接取负。具体编码策略见
+[`primus_modulus`](../primus_modulus/README.zh_CN.md#算术契约)。
+
+LWE、GLWE 和 NTRU 均使用此有界转换。NTRU 参数会验证采样支持不超过模数允许的幅度；
+调用方导入私钥或转换到另一模数时，必须保证系数符合目标模数的范围。
+只有已验证的原始模数值时，可使用 `UintModulus(q)`，无需构建约简预计算。
+
 ## Value-side 镜像
 
 [`primus_modulo`](../primus_modulo/README.zh_CN.md) 提供可选的 value-receiver 镜像，例如 `a.add_modulo(b, modulus)`。本 crate 的 modulus-side trait 仍是主要实现边界和 workspace 集成边界。

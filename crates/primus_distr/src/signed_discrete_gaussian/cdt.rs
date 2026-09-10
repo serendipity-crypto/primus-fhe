@@ -5,7 +5,7 @@ use rand::distr::Distribution;
 
 use crate::{
     DistrErr,
-    gaussian_core::{CDT_MAX_MAGNITUDE, GaussianParameters, build_cdt},
+    gaussian_core::{CDT_MAX_MAGNITUDE, GaussianParameters, build_cdt, encode_signed},
     utils::cdt_index_by,
 };
 
@@ -44,6 +44,12 @@ impl<T: SignedInteger> SignedCDTSampler<T> {
     pub fn std_dev(&self) -> f64 {
         self.std_dev
     }
+
+    #[inline]
+    pub(crate) fn maximum_magnitude(&self) -> u64 {
+        // The table includes a lower boundary and a terminal sentinel.
+        (self.cdt.len() - 2) as u64
+    }
 }
 
 impl<T: SignedInteger> Distribution<T> for SignedCDTSampler<T> {
@@ -54,10 +60,6 @@ impl<T: SignedInteger> Distribution<T> for SignedCDTSampler<T> {
         let index = cdt_index_by(&self.cdt, &random, Ord::cmp);
         let value: T = index.as_into();
 
-        if value.is_zero() {
-            return T::ZERO;
-        }
-
-        if positive { value } else { T::ZERO - value }
+        encode_signed(positive, value)
     }
 }

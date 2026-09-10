@@ -55,6 +55,44 @@ This crate defines interfaces, not validation boundaries. Each public method doc
 
 `FieldContext` means that a modulus type implements the listed operation set. It does not prove that the modulus is prime or that every nonzero residue is invertible. Callers remain responsible for validating the algebraic assumptions required by their algorithms.
 
+## Signed coefficients
+
+`EncodeSigned<T>` converts bounded signed coefficients to canonical residues,
+without plaintext scaling or general modular reduction. It is implemented for
+the concrete modulus types in `primus_modulus` and exported from both the crate
+root and `prelude`. It does not require `Reduce` or `ReduceNeg`. Custom modulus
+types implement `encode_signed`; the default slice method checks equal lengths
+once and statically calls that scalar implementation.
+
+`RingContext<T>` includes `EncodeSigned<T>`, and `FieldContext<T>` inherits it
+through `RingContext<T>`. Generic code using either context can call the encoding
+methods without another trait bound or import. Both contexts require
+`T: FheUint`; code needing only signed conversion can use `EncodeSigned<T>` alone.
+
+```rust
+use primus_modulus::{NativeModulus, UintModulus};
+use primus_reduce::prelude::*;
+
+assert_eq!(UintModulus::new(97u64).encode_signed(-1), 96);
+assert_eq!(NativeModulus::<u64>::new().encode_signed(-1), u64::MAX);
+let mut output = [0u64; 3];
+UintModulus::new(97).encode_signed_slice_to(&[-1, 0, 1], &mut output);
+assert_eq!(output, [96, 0, 1]);
+```
+
+For an explicit modulus `q`, every coefficient must satisfy
+`value.unsigned_abs() < q`. This is a correctness precondition, not a release
+validation pass. Every signed value is representable under the native modulus.
+Both methods handle the signed minimum without signed negation. See
+[`primus_modulus`](../primus_modulus/README.md#arithmetic-contracts) for the
+concrete encoding strategies.
+
+LWE, GLWE and NTRU use this bounded conversion. NTRU parameters validate the
+sampler's support against their modulus; callers importing keys or converting
+them to a different modulus must ensure the coefficients fit that target.
+When an already validated raw modulus is all that is available, `UintModulus(q)`
+provides the operation without building a reduction context.
+
 ## Value-side mirror
 
 [`primus_modulo`](../primus_modulo/README.md) provides an optional value-receiver mirror such as `a.add_modulo(b, modulus)`. The modulus-side traits in this crate remain the primary implementation and workspace integration boundary.

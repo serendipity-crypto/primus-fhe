@@ -60,6 +60,7 @@ The operation traits, input ranges, output ranges, and slice-length requirements
 - Lazy operations return representatives in `[0, 2 * modulus)` and require a final once-reduction before canonical use.
 - Low-level slice kernels may use `debug_assert*!` for shape diagnostics; release callers must uphold the documented length contracts.
 - `FieldContext` is a capability marker. It does not prove primality or guarantee that every nonzero value is invertible.
+- `EncodeSigned` converts coefficients with unsigned magnitude less than the explicit modulus; Native accepts every signed value. Native preserves the bit pattern, PowOf2 applies its mask, and Uint/Compact/Barrett share the explicit-modulus conversion. The default slice method checks equal lengths once and uses the concrete scalar implementation.
 
 ## License
 

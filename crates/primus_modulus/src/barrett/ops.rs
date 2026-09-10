@@ -1,9 +1,16 @@
-use primus_integer::UnsignedInteger;
+use primus_integer::{FheUint, UnsignedInteger};
 use primus_reduce::{ReduceError, prelude::*};
 
-use crate::common::compact;
+use crate::{UintModulus, common::compact};
 
 use super::BarrettModulus;
+
+impl<T: FheUint> EncodeSigned<T> for BarrettModulus<T> {
+    #[inline(always)]
+    fn encode_signed(self, value: T::SignedInteger) -> T {
+        UintModulus(self.value).encode_signed(value)
+    }
+}
 
 impl<T: UnsignedInteger> LazyReduce<T> for BarrettModulus<T> {
     type Output = T;

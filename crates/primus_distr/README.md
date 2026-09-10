@@ -23,17 +23,61 @@ representations, CRT batch layouts, and statistical diagnostics.
 | `CDTSampler<T>` / `SignedCDTSampler<T>` | Explicit portable 64-bit cumulative-distribution-table backends |
 | `DiscreteZiggurat<T>` / `SignedDiscreteZiggurat<T>` | Explicit discrete Ziggurat backends for larger supports |
 
-All sampler types implement `rand::distr::Distribution`. Batch helpers require
+The scalar sampler types above implement `rand::distr::Distribution`. Batch helpers require
 an RNG implementing both `rand::Rng` and `rand::CryptoRng`.
 
 ## Secret-key distribution parameters
 
 `SecretKeyDistr` describes binary, ternary, fixed-weight, and Gaussian secret
 coefficient distributions; it is a parameter enum, not a sampler.
-`validate_for_length` checks probabilities and weights for the complete logical
-key and returns `SecretKeyDistrError` on failure. Gaussian parameters are checked
-by the selected Gaussian sampler constructor. Each cryptosystem determines
-which variants it supports.
+Its constructors check probabilities and weights for the complete logical key.
+Gaussian parameters are checked by the selected Gaussian sampler constructor.
+Each cryptosystem determines which variants it supports.
+
+Use `SecretKeyDistr::binary(one_probability)` or
+`SecretKeyDistr::ternary(negative_one_probability, one_probability)` for custom
+probabilities; construction checks that each is finite and in `[0, 1]` and that
+ternary probabilities sum to at most one. `SecretKeyDistr::gaussian(standard_deviation)`
+constructs `Gaussian { standard_deviation }`, with validation deferred to the
+Gaussian sampler. Parameterless variants are used directly. Whole-key sampler
+construction also checks probabilities when variants are constructed directly.
+
+Fixed-weight constructors distinguish total weight from a fixed composition:
+
+| Constructor | Distribution |
+| --- | --- |
+| `fixed_hamming_weight_binary(length, weight)` | Exactly `weight` ones at uniformly selected positions |
+| `fixed_hamming_weight_ternary(length, weight)` | Exactly `weight` nonzero positions with independent uniform signs |
+| `fixed_composition_ternary(length, negative_weight, positive_weight)` | Exact separate counts of negative and positive ones |
+
+These constructors reject excessive weights and sum overflow immediately. The
+length is not retained, and raw enum construction remains possible, so sampling
+boundaries still validate the actual output length.
+
+`EncodedSecretKeySampler<T>::new(distribution, modulus_minus_one)` and
+`SignedSecretKeySampler<S>::new(distribution)` prepare whole-key sampling.
+They own matching Gaussian tables and binary/ternary probability thresholds and expose `distr()`,
+`sample(length, rng)` and `sample_to(output, rng)`. The latter overwrites caller
+storage without allocating. Fixed weights apply to the complete output, and
+invalid output lengths are rejected before writing or sampling. These whole-key
+samplers do not implement scalar `Distribution`: fixed weights correlate the
+coefficients. LWE and NTRU parameters retain these samplers for reuse; GLWE
+coefficient-key generation prepares one from its distribution descriptor.
+
+`SignedSecretKeySampler::maximum_magnitude()` returns an inclusive unsigned
+sample bound. Parameters can check it once against a target modulus before
+using bounded signed encoding. Gaussian sampling uses its truncated support;
+binary and ternary sampling conservatively return one. The underlying
+`SignedDiscreteGaussian::maximum_magnitude()` also respects custom backend
+tail cuts. Neither sampler stores a ciphertext modulus.
+
+Custom-probability and fixed-weight binary/ternary vector helpers also have
+`_to` variants. Encoded samplers emit residues directly; they do not first
+allocate a signed vector. Sampling algorithms may change RNG consumption and
+seeded output across versions; empty sampling is not generally guaranteed to
+consume no randomness. Custom ternary sampling rounds each probability down to
+a multiple of `2^-64`, caps the total nonzero mass at one for floating-point
+boundary rounding.
 
 ## Example
 
@@ -77,6 +121,14 @@ chosen directly.
 returns positive, zero, and negative values directly.
 
 ## Batch sampling
+
+`DiscreteGaussian` and `SignedDiscreteGaussian` provide `sample_vec(length, rng)`
+and `sample_to(output, rng)`. Both select the backend once per batch. The former
+initializes a new vector directly from samples; the latter overwrites caller
+storage without allocating. Both preserve the output and RNG consumption of
+repeated scalar `Distribution::sample` calls, including no RNG consumption for
+empty batches. The existing `sample_gaussian_values*` helpers delegate to these
+methods. Scalar `sample(rng)` remains available through `Distribution`.
 
 The crate provides allocating functions and matching `_to` functions that fill
 caller-owned slices. Besides uniform binary and sparse or uniform ternary
@@ -139,6 +191,7 @@ cargo test -p primus_distr --features high_precision
 cargo test -p primus_distr
 cargo bench -p primus_distr --bench gen_sampler
 cargo bench -p primus_distr --bench sample_gaussian
+cargo bench -p primus_distr --bench sample_secret_key
 ```
 
 ## License

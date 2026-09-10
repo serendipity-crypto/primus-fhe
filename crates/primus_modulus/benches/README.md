@@ -6,6 +6,9 @@
   elementwise multiplication, and dot products.
 - `barrett_slice`: canonical/lazy elementwise multiplication, dot products,
   and batch inversion.
+- `signed_encoding`: bounded signed-to-residue conversion for Native/PowOf2/Barrett,
+  u32/u64, at lengths 1024 and 16384. One iteration fills one slice of mixed
+  signed coefficients in [-38, 38]; allocation and input generation are excluded.
 - `slice_arithmetic`: Native/Barrett u32/u64 subtraction, negation, broadcast
   scalar multiplication, scalar multiply-add, and in-place add/sub. Barrett
   output-add is included; Native output-add remains in `slice_moduli`.

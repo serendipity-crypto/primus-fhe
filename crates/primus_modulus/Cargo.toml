@@ -10,6 +10,7 @@ primus_gcd = { path = "../primus_gcd" }
 primus_integer = { path = "../primus_integer" }
 primus_reduce = { path = "../primus_reduce" }
 primus_barrett_derive = { path = "../primus_barrett_derive", optional = true }
+num-traits = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -42,4 +43,8 @@ simd = ["primus_integer/simd", "primus_barrett_derive?/simd"]
 
 [[bench]]
 name = "slice_arithmetic"
+harness = false
+
+[[bench]]
+name = "signed_encoding"
 harness = false

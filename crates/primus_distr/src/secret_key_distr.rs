@@ -22,22 +22,137 @@ pub enum SecretKeyDistr {
         one_probability: f64,
     },
     /// Binary coefficients with an exact number of ones.
+    /// Use [`Self::fixed_hamming_weight_binary`] to check the logical key length.
     FixedHammingWeightBinary {
         /// Exact number of coefficients equal to `1`.
         hamming_weight: usize,
     },
-    /// Ternary coefficients with exact numbers of negative and positive ones.
+    /// Exactly `hamming_weight` uniformly selected nonzero positions, with
+    /// independent uniform signs. Positive and negative counts are not fixed.
     FixedHammingWeightTernary {
+        /// Exact number of nonzero coefficients in the complete logical key.
+        hamming_weight: usize,
+    },
+    /// Ternary coefficients with exact numbers of negative and positive ones.
+    /// Use [`Self::fixed_composition_ternary`] to check the logical key length.
+    FixedCompositionTernary {
         /// Exact number of coefficients equal to `-1`.
         negative_one_weight: usize,
         /// Exact number of coefficients equal to `1`.
         one_weight: usize,
     },
     /// Centered discrete Gaussian coefficients with the given standard deviation.
-    Gaussian(f64),
+    Gaussian {
+        /// Standard deviation of the centered discrete Gaussian.
+        standard_deviation: f64,
+    },
 }
 
 impl SecretKeyDistr {
+    /// Constructs a binary distribution with the given probability of `1`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the probability is not finite or is outside `[0, 1]`.
+    #[must_use]
+    #[inline]
+    pub fn binary(one_probability: f64) -> Self {
+        validate_probability(one_probability);
+        Self::Binary { one_probability }
+    }
+
+    /// Constructs a ternary distribution with the given probabilities of `-1`
+    /// and `1`; the remaining probability belongs to `0`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either probability is not finite or is outside `[0, 1]`,
+    /// or their sum exceeds one.
+    #[must_use]
+    #[inline]
+    pub fn ternary(negative_one_probability: f64, one_probability: f64) -> Self {
+        validate_ternary_probabilities(negative_one_probability, one_probability);
+        Self::Ternary {
+            negative_one_probability,
+            one_probability,
+        }
+    }
+
+    /// Constructs a binary distribution with exactly `hamming_weight` ones
+    /// in a complete logical key of `length` coefficients.
+    ///
+    /// The length is checked but not stored; sampling checks the actual output
+    /// length again because it may differ from this length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `hamming_weight > length`.
+    #[must_use]
+    #[inline]
+    pub fn fixed_hamming_weight_binary(length: usize, hamming_weight: usize) -> Self {
+        assert!(
+            hamming_weight <= length,
+            "binary Hamming weight must not exceed the key length"
+        );
+        Self::FixedHammingWeightBinary { hamming_weight }
+    }
+
+    /// Constructs a ternary distribution with exactly `hamming_weight` nonzero
+    /// coefficients at uniformly selected positions and independent uniform signs.
+    /// The length is checked but not stored; sampling checks the actual length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `hamming_weight > length`.
+    #[must_use]
+    #[inline]
+    pub fn fixed_hamming_weight_ternary(length: usize, hamming_weight: usize) -> Self {
+        assert!(
+            hamming_weight <= length,
+            "ternary Hamming weight must not exceed the key length"
+        );
+        Self::FixedHammingWeightTernary { hamming_weight }
+    }
+
+    /// Constructs a ternary distribution with exact negative and positive
+    /// weights in a complete logical key of `length` coefficients.
+    ///
+    /// The length is checked but not stored; sampling checks the actual output
+    /// length again because it may differ from this length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the weight sum overflows `usize` or exceeds `length`.
+    #[must_use]
+    #[inline]
+    pub fn fixed_composition_ternary(
+        length: usize,
+        negative_one_weight: usize,
+        one_weight: usize,
+    ) -> Self {
+        let nonzero_weight = negative_one_weight
+            .checked_add(one_weight)
+            .expect("ternary Hamming weights must fit in usize");
+        assert!(
+            nonzero_weight <= length,
+            "ternary Hamming weights must not exceed the key length"
+        );
+        Self::FixedCompositionTernary {
+            negative_one_weight,
+            one_weight,
+        }
+    }
+
+    /// Describes a centered discrete Gaussian with the given standard deviation.
+    ///
+    /// Validation is deferred to sampler construction, where the output type,
+    /// modulus (if any), and Gaussian backend are known.
+    #[must_use]
+    #[inline]
+    pub const fn gaussian(standard_deviation: f64) -> Self {
+        Self::Gaussian { standard_deviation }
+    }
+
     /// Returns whether the distribution produces only coefficients in `{0, 1}`.
     #[must_use]
     #[inline]
@@ -58,72 +173,25 @@ impl SecretKeyDistr {
                 | Self::UniformTernary
                 | Self::Ternary { .. }
                 | Self::FixedHammingWeightTernary { .. }
+                | Self::FixedCompositionTernary { .. }
         )
     }
-
-    /// Validates probabilities and any fixed weight for a key of `length` coefficients.
-    ///
-    /// Fixed-weight distributions apply to the complete logical key represented by
-    /// the sampled coefficient slice.
-    pub fn validate_for_length(self, length: usize) -> Result<(), SecretKeyDistrError> {
-        match self {
-            Self::Binary { one_probability } => validate_probability(one_probability),
-            Self::Ternary {
-                negative_one_probability,
-                one_probability,
-            } => {
-                validate_probability(negative_one_probability)?;
-                validate_probability(one_probability)?;
-                if negative_one_probability > 1.0 - one_probability {
-                    return Err(SecretKeyDistrError::TernaryProbabilitySumExceedsOne);
-                }
-                Ok(())
-            }
-            Self::FixedHammingWeightBinary { hamming_weight } => {
-                if hamming_weight > length {
-                    return Err(SecretKeyDistrError::HammingWeightExceedsLength);
-                }
-                Ok(())
-            }
-            Self::FixedHammingWeightTernary {
-                negative_one_weight,
-                one_weight,
-            } => {
-                if negative_one_weight
-                    .checked_add(one_weight)
-                    .is_none_or(|weight| weight > length)
-                {
-                    return Err(SecretKeyDistrError::HammingWeightExceedsLength);
-                }
-                Ok(())
-            }
-            Self::UniformBinary
-            | Self::SparseTernary
-            | Self::UniformTernary
-            | Self::Gaussian(_) => Ok(()),
-        }
-    }
-}
-
-/// An invalid probability or fixed weight in a secret-key distribution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum SecretKeyDistrError {
-    /// A configured probability is NaN, infinite, negative, or greater than one.
-    #[error("secret-key coefficient probability must be finite and in [0, 1]")]
-    InvalidProbability,
-    /// The configured ternary probabilities leave a negative probability for zero.
-    #[error("the probabilities of -1 and 1 must sum to at most one")]
-    TernaryProbabilitySumExceedsOne,
-    /// A fixed Hamming weight is greater than the logical key length.
-    #[error("secret-key Hamming weight exceeds the logical key length")]
-    HammingWeightExceedsLength,
 }
 
 #[inline]
-fn validate_probability(probability: f64) -> Result<(), SecretKeyDistrError> {
-    if probability.is_finite() && (0.0..=1.0).contains(&probability) {
-        Ok(())
-    } else {
-        Err(SecretKeyDistrError::InvalidProbability)
-    }
+fn validate_probability(probability: f64) {
+    assert!(
+        probability.is_finite() && (0.0..=1.0).contains(&probability),
+        "secret-key coefficient probability must be finite and in [0, 1]"
+    );
+}
+
+#[inline]
+pub(crate) fn validate_ternary_probabilities(negative: f64, positive: f64) {
+    validate_probability(negative);
+    validate_probability(positive);
+    assert!(
+        negative <= 1.0 - positive,
+        "the probabilities of -1 and 1 must sum to at most one"
+    );
 }

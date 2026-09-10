@@ -18,7 +18,7 @@ fn check_equations<T: FheUint, M: RingContext<T>>(modulus: M) {
     for (dimension, distribution) in [
         (1, SecretKeyDistr::UniformBinary),
         (7, SecretKeyDistr::UniformTernary),
-        (257, SecretKeyDistr::Gaussian(2.0)),
+        (257, SecretKeyDistr::gaussian(2.0)),
     ] {
         // Tiny dimensions and noise are arithmetic fixtures, not security parameters.
         let params = LweParameters::new(dimension, T::as_from(4u32), modulus, distribution, 3.2);

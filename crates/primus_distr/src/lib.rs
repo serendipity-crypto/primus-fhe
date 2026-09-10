@@ -17,6 +17,8 @@
 //! [`SecretKeyDistr`] describes secret-coefficient distributions and validates
 //! probabilities and fixed weights. Cryptosystems select supported variants;
 //! Gaussian sampler constructors validate Gaussian parameters.
+//! [`EncodedSecretKeySampler`] and [`SignedSecretKeySampler`] prepare reusable
+//! whole-key sampling, including Gaussian tables and fixed-weight validation.
 //!
 //! # Sampler selection
 //!
@@ -72,4 +74,7 @@ pub use signed_discrete_gaussian::{
 };
 
 mod secret_key_distr;
-pub use secret_key_distr::{SecretKeyDistr, SecretKeyDistrError};
+pub use secret_key_distr::SecretKeyDistr;
+
+mod secret_key_sampler;
+pub use secret_key_sampler::{EncodedSecretKeySampler, SecretKeySampler, SignedSecretKeySampler};

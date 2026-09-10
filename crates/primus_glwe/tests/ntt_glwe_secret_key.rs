@@ -25,7 +25,7 @@ where
     for secret_key_distr in [
         SecretKeyDistr::UniformBinary,
         SecretKeyDistr::SparseTernary,
-        SecretKeyDistr::Gaussian(3.2),
+        SecretKeyDistr::gaussian(3.2),
     ] {
         let params = GlweParameters::new(
             DIMENSION,

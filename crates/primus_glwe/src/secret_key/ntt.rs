@@ -3,9 +3,10 @@
 use primus_data::{Data, DataMut};
 use primus_integer::FheUint;
 use primus_lattice::GlweSize;
+use primus_modulus::UintModulus;
 use primus_ntt::NttTable;
 use primus_poly::{NttPolynomial, NttPolynomialIter, Polynomial, PolynomialOwned};
-use primus_reduce::FieldContext;
+use primus_reduce::{EncodeSigned, FieldContext};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
     ScaledCodec, SecretKeyDistr, TruncatedGlweCiphertext,
 };
 
-use super::{GlweSecretKey, encode_secret_polynomial_to};
+use super::GlweSecretKey;
 
 /// Represents a secret key for the (NTT) Module Learning with Errors (MLWE)
 /// cryptographic scheme.
@@ -72,6 +73,11 @@ impl<T: FheUint> NttGlweSecretKey<T> {
     }
 
     /// Creates a new [`NttGlweSecretKey`] from [`GlweSecretKey`].
+    ///
+    /// # Correctness
+    ///
+    /// Every signed coefficient in `secret_key` must satisfy `s.unsigned_abs() < q`,
+    /// where `q` is `ntt_table.modulus()`; see [`EncodeSigned::encode_signed`].
     #[inline]
     pub fn from_coeff_secret_key<Table>(secret_key: &GlweSecretKey<T>, ntt_table: &Table) -> Self
     where
@@ -82,8 +88,9 @@ impl<T: FheUint> NttGlweSecretKey<T> {
         assert_eq!(ntt_table.poly_length(), poly_length);
 
         let mut key = vec![T::ZERO; size.mask_len()];
+        let modulus = UintModulus(ntt_table.modulus());
         for (coefficients, ntt_secret) in secret_key.iter().zip(key.chunks_exact_mut(poly_length)) {
-            encode_secret_polynomial_to(coefficients, ntt_secret, ntt_table.modulus());
+            modulus.encode_signed_slice_to(coefficients, ntt_secret);
             ntt_table.transform_slice(ntt_secret);
         }
 

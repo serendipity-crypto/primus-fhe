@@ -1,13 +1,11 @@
 use primus_data::{Data, DataMut};
 use primus_distr::DiscreteGaussian;
-use primus_integer::{FheUint, SignedInteger};
+use primus_integer::FheUint;
 use primus_lattice::lwe::Lwe;
 use primus_reduce::RingContext;
 use rand::distr::{Distribution, Uniform};
 
 use crate::LweCiphertext;
-
-use super::encode_signed;
 
 /// Borrowed LWE secret coefficients, without copying or converting key storage.
 ///
@@ -155,8 +153,9 @@ impl<T: FheUint> LweSecretKeyRef<'_, T> {
         modulus.reduce_sub(*body, self.dot_product(mask, modulus))
     }
 
-    /// Dispatches key representation and modulus shape outside the coefficient
-    /// loop. Slice dot products retain the modulus backend's SIMD dispatch.
+    /// Selects key representation outside the coefficient loop. Signed encoding
+    /// does not dispatch on modulus shape, and encoded slice dot products retain
+    /// the modulus backend's SIMD dispatch.
     #[inline]
     fn dot_product<M>(self, mask: &[T], modulus: M) -> T
     where
@@ -170,16 +169,10 @@ impl<T: FheUint> LweSecretKeyRef<'_, T> {
                     key.len(),
                     "LWE mask dimension must match the secret key"
                 );
-                match modulus.explicit_value() {
-                    Some(q) => modulus.reduce_dot_product_iter(
-                        mask.iter().copied(),
-                        key.iter().copied().map(|s| encode_signed(s, q)),
-                    ),
-                    None => modulus.reduce_dot_product_iter(
-                        mask.iter().copied(),
-                        key.iter().copied().map(SignedInteger::cast_to_unsigned),
-                    ),
-                }
+                modulus.reduce_dot_product_iter(
+                    mask.iter().copied(),
+                    key.iter().copied().map(|s| modulus.encode_signed(s)),
+                )
             }
         }
     }

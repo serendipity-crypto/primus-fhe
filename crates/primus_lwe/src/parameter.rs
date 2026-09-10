@@ -1,4 +1,4 @@
-use primus_distr::DiscreteGaussian;
+use primus_distr::{DiscreteGaussian, EncodedSecretKeySampler};
 use primus_integer::FheUint;
 use primus_reduce::RingContext;
 use rand::distr::Uniform;
@@ -23,9 +23,7 @@ where
     cipher_modulus_minus_one: T,
     cipher_modulus_uniform_distr: Uniform<T>,
     plaintext_codec: RoundedCodec<T>,
-    /// The distribution type of the LWE Secret Key.
-    secret_key_distr: SecretKeyDistr,
-    secret_key_gaussian: Option<DiscreteGaussian<T>>,
+    secret_key_sampler: EncodedSecretKeySampler<T>,
     /// The noise distribution.
     noise_distribution: DiscreteGaussian<T>,
 }
@@ -40,9 +38,8 @@ where
     /// # Panics
     ///
     /// Panics if `dimension` is zero or `dimension + 1` overflows `usize`,
-    /// the secret distribution is invalid for
-    /// `dimension`, either Gaussian sampler fails the validity rules of
-    /// [`DiscreteGaussian::new`],
+    /// secret-key probabilities are invalid, either Gaussian sampler fails the
+    /// validity rules of [`DiscreteGaussian::new`],
     /// or the plaintext/ciphertext moduli fail the rules of
     /// [`RoundedCodec::new`](primus_encoding::RoundedCodec::new).
     #[inline]
@@ -55,19 +52,12 @@ where
     ) -> Self {
         assert!(dimension != 0, "LWE dimension must be non-zero");
         dimension.checked_add(1).expect("LWE length overflow");
-        secret_key_distr
-            .validate_for_length(dimension)
-            .expect("invalid LWE secret-key distribution");
         let cipher_modulus_minus_one = cipher_modulus.minus_one();
 
         let noise_distribution =
             DiscreteGaussian::new(noise_standard_deviation, cipher_modulus_minus_one).unwrap();
-        let secret_key_gaussian =
-            if let SecretKeyDistr::Gaussian(standard_deviation) = secret_key_distr {
-                Some(DiscreteGaussian::new(standard_deviation, cipher_modulus_minus_one).unwrap())
-            } else {
-                None
-            };
+        let secret_key_sampler =
+            EncodedSecretKeySampler::new(secret_key_distr, cipher_modulus_minus_one);
 
         let cipher_modulus_uniform_distr = cipher_modulus.uniform_distribution();
         let plaintext_codec =
@@ -80,8 +70,7 @@ where
             cipher_modulus_minus_one,
             cipher_modulus_uniform_distr,
             plaintext_codec,
-            secret_key_distr,
-            secret_key_gaussian,
+            secret_key_sampler,
             noise_distribution,
         }
     }
@@ -131,12 +120,12 @@ where
     /// Returns the secret key type of this [`LweParameters<T, M>`].
     #[inline]
     pub fn secret_key_distr(&self) -> SecretKeyDistr {
-        self.secret_key_distr
+        self.secret_key_sampler.distr()
     }
 
     #[inline]
-    pub(crate) fn secret_key_gaussian(&self) -> Option<&DiscreteGaussian<T>> {
-        self.secret_key_gaussian.as_ref()
+    pub(crate) fn secret_key_sampler(&self) -> &EncodedSecretKeySampler<T> {
+        &self.secret_key_sampler
     }
 
     /// Returns the noise standard deviation of this [`LweParameters<T, M>`].

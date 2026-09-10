@@ -7,7 +7,7 @@ use primus_integer::{FheUint, SignedInteger};
 use primus_lattice::{MAX_POLY_LENGTH, MIN_POLY_LENGTH};
 use primus_modulus::NativeModulus;
 use primus_poly::{FourierPolynomial, FourierPolynomialOwned, Polynomial, PolynomialOwned};
-use primus_reduce::ReduceSub;
+use primus_reduce::{EncodeSigned, ReduceSub};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{FourierNtruCiphertext, NtruError, NtruParameters, SecretKeyDistr};
@@ -82,12 +82,8 @@ impl FourierNtruSecretKey {
         }
 
         let mut native_coefficients = vec![T::ZERO; poly_length];
-        native_coefficients
-            .iter_mut()
-            .zip(secret_key.as_slice())
-            .for_each(|(output, &coefficient)| {
-                *output = coefficient.cast_to_unsigned();
-            });
+        NativeModulus::new()
+            .encode_signed_slice_to(secret_key.as_slice(), &mut native_coefficients);
 
         let mut key = FourierPolynomialOwned::zero(fft.fourier_length());
         fft.forward_as_integer(&native_coefficients, key.as_mut());
@@ -161,7 +157,8 @@ impl FourierNtruSecretKey {
     /// # Panics
     ///
     /// Panics unless the parameter distribution is binary and
-    /// `active_length` belongs to `1..=N`.
+    /// `active_length` belongs to `1..=N`. Also panics if a fixed Hamming weight
+    /// exceeds `active_length`.
     pub fn generate_padded_binary_pair<T, Table, R>(
         params: &NtruParameters<T, NativeModulus<T>>,
         active_length: usize,
@@ -175,10 +172,6 @@ impl FourierNtruSecretKey {
     {
         assert!(params.secret_key_distr().is_binary());
         assert!((1..=params.poly_length()).contains(&active_length));
-        params
-            .secret_key_distr()
-            .validate_for_length(active_length)
-            .expect("invalid padded NTRU secret-key distribution");
         assert_eq!(fft.poly_length(), params.poly_length());
 
         for _ in 0..crate::parameter::KEY_GENERATION_ATTEMPTS {

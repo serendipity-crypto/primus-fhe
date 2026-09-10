@@ -4,6 +4,18 @@ use syn::Ident;
 
 pub(crate) fn ops(name: &Ident, modulus: &TokenStream, ty: &syn::Path) -> TokenStream {
     quote! {
+        impl ::primus_modulus::reduce::EncodeSigned<#ty> for #name {
+            #[inline(always)]
+            fn encode_signed(
+                self,
+                value: <#ty as ::primus_modulus::integer::UnsignedInteger>::SignedInteger,
+            ) -> #ty {
+                ::primus_modulus::reduce::EncodeSigned::encode_signed(
+                    ::primus_modulus::UintModulus(#modulus), value,
+                )
+            }
+        }
+
         impl ::primus_modulus::reduce::Reduce<#ty> for #name {
             type Output = #ty;
 

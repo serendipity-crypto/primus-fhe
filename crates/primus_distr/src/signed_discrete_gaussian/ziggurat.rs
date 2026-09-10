@@ -10,6 +10,9 @@ use crate::{
 #[derive(Clone)]
 pub struct SignedDiscreteZiggurat<T: FheInt + SignedInteger> {
     core: ZigguratMagnitudeSampler<T>,
+    // Preserve the construction's integer support bound independently of the
+    // floating-point sampling tables.
+    maximum_magnitude: u64,
 }
 
 impl<T: FheInt + SignedInteger> SignedDiscreteZiggurat<T> {
@@ -26,6 +29,7 @@ impl<T: FheInt + SignedInteger> SignedDiscreteZiggurat<T> {
         let parameters = parameters.validate_signed_output::<T>()?;
         Ok(Self {
             core: ZigguratMagnitudeSampler::new(parameters)?,
+            maximum_magnitude: parameters.maximum_magnitude(),
         })
     }
 
@@ -33,6 +37,11 @@ impl<T: FheInt + SignedInteger> SignedDiscreteZiggurat<T> {
     #[inline]
     pub fn std_dev(&self) -> f64 {
         self.core.standard_deviation()
+    }
+
+    #[inline]
+    pub(crate) fn maximum_magnitude(&self) -> u64 {
+        self.maximum_magnitude
     }
 }
 

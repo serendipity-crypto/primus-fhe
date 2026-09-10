@@ -10,7 +10,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{NtruError, NtruParameters, NttNtruCiphertext, SecretKeyDistr};
 
-use super::{NtruSecretKey, encode_secret_polynomial_to};
+use super::NtruSecretKey;
 
 /// An NTRU secret key represented by `NTT(f)` and its exact pointwise inverse.
 #[derive(Clone)]
@@ -45,6 +45,13 @@ impl<T: FheUint> NttNtruSecretKey<T> {
 
     /// Converts a coefficient key to NTT form and computes `NTT(f)^(-1)`.
     ///
+    /// # Correctness
+    ///
+    /// Every coefficient must have unsigned magnitude strictly less than
+    /// `modulus.value()`. Conversion uses [`EncodeSigned`](primus_reduce::EncodeSigned),
+    /// without general reduction. Keys generated from matching [`NtruParameters`] satisfy this
+    /// bound; callers importing keys or changing moduli must establish it.
+    ///
     /// # Errors
     ///
     /// Returns [`NtruError::NonInvertibleSecretKey`] if an NTT evaluation of
@@ -63,7 +70,7 @@ impl<T: FheUint> NttNtruSecretKey<T> {
         assert_eq!(ntt_table.modulus(), modulus.value());
 
         let mut key = NttPolynomialOwned::zero(poly_length);
-        encode_secret_polynomial_to(secret_key.as_slice(), key.as_mut(), modulus);
+        modulus.encode_signed_slice_to(secret_key.as_slice(), key.as_mut());
         ntt_table.transform_slice(key.as_mut());
 
         let mut inv_key = NttPolynomialOwned::zero(poly_length);
@@ -143,7 +150,8 @@ impl<T: FheUint> NttNtruSecretKey<T> {
     /// # Panics
     ///
     /// Panics unless the parameter distribution is binary and
-    /// `active_length` belongs to `1..=N`.
+    /// `active_length` belongs to `1..=N`. Also panics if a fixed Hamming weight
+    /// exceeds `active_length`.
     pub fn generate_padded_binary_pair<M, Table, R>(
         params: &NtruParameters<T, M>,
         active_length: usize,
@@ -157,10 +165,6 @@ impl<T: FheUint> NttNtruSecretKey<T> {
     {
         assert!(params.secret_key_distr().is_binary());
         assert!((1..=params.poly_length()).contains(&active_length));
-        params
-            .secret_key_distr()
-            .validate_for_length(active_length)
-            .expect("invalid padded NTRU secret-key distribution");
         assert_eq!(ntt_table.poly_length(), params.poly_length());
         assert_eq!(ntt_table.modulus(), params.cipher_modulus().value());
 

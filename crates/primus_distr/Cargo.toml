@@ -26,3 +26,7 @@ harness = false
 [[bench]]
 name = "gen_sampler"
 harness = false
+
+[[bench]]
+name = "sample_secret_key"
+harness = false

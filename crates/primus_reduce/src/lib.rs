@@ -8,6 +8,8 @@
 //!
 //! The two marker supertraits [`RingContext`] and [`FieldContext`]
 //! aggregate the full ring / field operation sets respectively.
+//! [`RingContext`] also includes bounded signed encoding via [`EncodeSigned`],
+//! implemented by each concrete modulus type.
 //! These names describe supported operation sets rather than proving algebraic
 //! properties: in particular, [`FieldContext`] does not guarantee that the
 //! modulus is prime or that every nonzero residue is invertible.
@@ -15,10 +17,10 @@
 //! # Implementing [`RingContext`] / [`FieldContext`]
 //!
 //! Both are *marker* traits with blanket impls: implement every listed
-//! `Reduce*` trait for your modulus type to obtain [`RingContext`]. Implement
-//! [`ExplicitModulus`] and the additional `LazyReduce*` / field traits to
-//! obtain [`FieldContext`]. Callers remain responsible for validating any
-//! required primality or invertibility assumptions.
+//! `Reduce*` trait and [`EncodeSigned`] for your modulus type to obtain
+//! [`RingContext`]. Implement [`ExplicitModulus`] and the additional
+//! `LazyReduce*` / field traits to obtain [`FieldContext`]. Callers remain
+//! responsible for validating any required primality or invertibility assumptions.
 
 #![deny(missing_docs)]
 
@@ -28,6 +30,7 @@ mod error;
 mod lazy_ops;
 mod lazy_slice_ops;
 mod ops;
+mod signed;
 mod slice_ops;
 
 pub mod prelude;
@@ -37,6 +40,7 @@ pub use error::ReduceError;
 pub use lazy_ops::*;
 pub use lazy_slice_ops::*;
 pub use ops::*;
+pub use signed::EncodeSigned;
 pub use slice_ops::*;
 
 use num_traits::ConstZero;

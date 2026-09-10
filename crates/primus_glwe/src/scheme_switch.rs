@@ -13,7 +13,6 @@ use primus_ntt::NttTable;
 use primus_poly::PolynomialOwned;
 use primus_reduce::FieldContext;
 
-use crate::secret_key::encode_secret_polynomial_to;
 use crate::{GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext, NttGlweSecretKey};
 
 /// Reusable workspace for GLev-to-GGSW scheme switching.
@@ -45,6 +44,12 @@ pub struct NttGlweSchemeSwitchKey<T: FheUint> {
 
 impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
     /// Generates a scheme-switching key for one output GGSW layout.
+    ///
+    /// # Correctness
+    ///
+    /// Every signed coefficient in `secret_key` must satisfy `s.unsigned_abs() < q`,
+    /// where `q` is the ciphertext modulus in `key_domain`; see
+    /// [`EncodeSigned::encode_signed`](primus_reduce::EncodeSigned::encode_signed).
     pub fn generate<M, Table, R>(
         secret_key: &GlweSecretKey<T>,
         ntt_secret_key: &NttGlweSecretKey<T>,
@@ -73,11 +78,7 @@ impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
             .iter()
             .zip(data.chunks_exact_mut(key_size.ggsw_len()))
         {
-            encode_secret_polynomial_to(
-                secret_polynomial,
-                negated_secret.as_mut(),
-                modulus.value(),
-            );
+            modulus.encode_signed_slice_to(secret_polynomial, negated_secret.as_mut());
             modulus.reduce_neg_slice_assign(negated_secret.as_mut());
             ntt_secret_key.encrypt_ggsw_to(
                 &negated_secret,

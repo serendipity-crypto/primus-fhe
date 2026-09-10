@@ -64,7 +64,7 @@ where
 
         let cipher_modulus_uniform_distr = cipher_modulus.uniform_distribution();
         let secret_key_distribution =
-            if let SecretKeyDistr::Gaussian(standard_deviation) = secret_key_distr {
+            if let SecretKeyDistr::Gaussian { standard_deviation } = secret_key_distr {
                 Some(DiscreteGaussian::new(standard_deviation, cipher_modulus_minus_one).unwrap())
             } else {
                 None
@@ -162,9 +162,6 @@ where
         noise_standard_deviation: f64,
     ) -> Self {
         let size = GlweSize::new(dimension, poly_length);
-        secret_key_distr
-            .validate_for_length(size.mask_len())
-            .expect("invalid GLWE secret-key distribution");
         let cipher_modulus_value = cipher_modulus.explicit_value();
         let plaintext_codec = ScaledCodec::new(plain_modulus_value, cipher_modulus_value);
 

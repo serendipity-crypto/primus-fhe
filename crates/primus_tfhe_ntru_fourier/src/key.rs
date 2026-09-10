@@ -170,7 +170,7 @@ where
         coefficients[0] = T::ONE.cast_to_signed();
         let unit = NtruSecretKey::new(
             coefficients,
-            SecretKeyDistr::FixedHammingWeightBinary { hamming_weight: 1 },
+            SecretKeyDistr::fixed_hamming_weight_binary(parameters.poly_length(), 1),
         );
         FourierNtruKeySwitchingKey::generate(
             &unit,

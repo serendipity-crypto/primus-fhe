@@ -1,7 +1,6 @@
 //! Canonical coefficient-domain NTRU secret key.
 
 use primus_integer::FheUint;
-use rand::distr::Distribution;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{NtruParameters, SecretKeyDistr};
@@ -11,6 +10,10 @@ use crate::{NtruParameters, SecretKeyDistr};
 /// Signed coefficients are intentionally stored independently of a ciphertext
 /// modulus: `-1` is encoded as `q - 1` for NTT and as the native two's-complement
 /// bit pattern for Fourier only when the key is converted to that backend.
+/// Conversion to an explicit modulus `q` requires every coefficient's unsigned
+/// magnitude to be strictly less than `q`. Generated keys satisfy this bound
+/// for their parameter modulus; imported keys and conversions to another
+/// modulus retain this caller obligation.
 #[derive(Clone)]
 pub struct NtruSecretKey<T: FheUint> {
     pub(crate) key: Vec<T::SignedInteger>,
@@ -66,7 +69,16 @@ impl<T: FheUint> NtruSecretKey<T> {
         Self { key, distr }
     }
 
-    /// Creates a coefficient-domain NTRU key from canonical signed values.
+    /// Creates a coefficient-domain NTRU key from signed values.
+    ///
+    /// No modulus is attached to this key. Before using an explicit-modulus
+    /// backend, the caller must ensure that every coefficient has unsigned
+    /// magnitude less than the target modulus. `distr` records the sampling
+    /// distribution; it does not validate the supplied coefficients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `key` is empty.
     #[inline]
     pub fn new(key: Vec<T::SignedInteger>, distr: SecretKeyDistr) -> Self {
         assert!(!key.is_empty(), "NTRU secret key must not be empty");
@@ -104,61 +116,7 @@ impl<T: FheUint> NtruSecretKey<T> {
     {
         let poly_length = params.poly_length();
         let distr = params.secret_key_distr();
-        let key = match distr {
-            SecretKeyDistr::UniformBinary => {
-                primus_distr::sample_uniform_binary_values(poly_length, rng)
-            }
-            SecretKeyDistr::Binary { one_probability } => {
-                primus_distr::sample_binary_values_with_probability(
-                    poly_length,
-                    one_probability,
-                    rng,
-                )
-            }
-            SecretKeyDistr::SparseTernary => primus_distr::sample_sparse_ternary_values(
-                -T::ONE.cast_to_signed(),
-                poly_length,
-                rng,
-            ),
-            SecretKeyDistr::UniformTernary => primus_distr::sample_uniform_ternary_values(
-                -T::ONE.cast_to_signed(),
-                poly_length,
-                rng,
-            ),
-            SecretKeyDistr::Ternary {
-                negative_one_probability,
-                one_probability,
-            } => primus_distr::sample_ternary_values_with_probabilities(
-                -T::ONE.cast_to_signed(),
-                poly_length,
-                negative_one_probability,
-                one_probability,
-                rng,
-            ),
-            SecretKeyDistr::FixedHammingWeightBinary { hamming_weight } => {
-                primus_distr::sample_fixed_hamming_weight_binary_values(
-                    poly_length,
-                    hamming_weight,
-                    rng,
-                )
-            }
-            SecretKeyDistr::FixedHammingWeightTernary {
-                negative_one_weight,
-                one_weight,
-            } => primus_distr::sample_fixed_hamming_weight_ternary_values(
-                -T::ONE.cast_to_signed(),
-                poly_length,
-                negative_one_weight,
-                one_weight,
-                rng,
-            ),
-            SecretKeyDistr::Gaussian(_) => params
-                .secret_key_distribution()
-                .expect("Gaussian NTRU key distribution must be precomputed")
-                .sample_iter(rng)
-                .take(poly_length)
-                .collect(),
-        };
+        let key = params.secret_key_sampler().sample(poly_length, rng);
         Self { key, distr }
     }
 }

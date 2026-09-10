@@ -7,9 +7,8 @@ use primus_lattice::nlev::{FourierNlev, NttNlev};
 use primus_modulus::NativeModulus;
 use primus_ntt::NttTable;
 use primus_poly::{Polynomial, PolynomialOwned};
-use primus_reduce::FieldContext;
+use primus_reduce::{EncodeSigned, FieldContext};
 
-use crate::secret_key::encode_secret_polynomial_to;
 use crate::{
     FourierNtruExternalProductContext, FourierNtruGadgetEncryptContext, FourierNtruSecretKey,
     NlevParameters, NtruCiphertext, NtruSecretKey, NttNtruExternalProductContext,
@@ -30,6 +29,13 @@ impl<T: FheUint> NttNtruKeySwitchingKey<T> {
     ///
     /// `parameters` supplies the output encryption domain and the key-switch
     /// decomposition basis `(B_ks, L_ks)`.
+    ///
+    /// # Correctness
+    ///
+    /// Every input secret coefficient must have unsigned magnitude strictly
+    /// less than the target `parameters.ntru().cipher_modulus().value()`.
+    /// This is the output key's modulus; validity under another modulus or
+    /// the key's distribution label does not establish this bound.
     pub fn generate<M, Table, R>(
         input_secret_key: &NtruSecretKey<T>,
         output_secret_key: &NttNtruSecretKey<T>,
@@ -47,11 +53,10 @@ impl<T: FheUint> NttNtruKeySwitchingKey<T> {
         assert_eq!(output_secret_key.poly_length(), poly_length);
 
         let mut encoded_secret = PolynomialOwned::zero(poly_length);
-        encode_secret_polynomial_to(
-            input_secret_key.as_slice(),
-            encoded_secret.as_mut(),
-            parameters.ntru().cipher_modulus(),
-        );
+        parameters
+            .ntru()
+            .cipher_modulus()
+            .encode_signed_slice_to(input_secret_key.as_slice(), encoded_secret.as_mut());
         let mut data = NttNlev::zero(parameters.nlev_len());
         output_secret_key.encrypt_nlev_to(
             &encoded_secret,
@@ -148,11 +153,8 @@ impl FourierNtruKeySwitchingKey {
         assert_eq!(output_secret_key.poly_length(), poly_length);
 
         let mut encoded_secret = PolynomialOwned::zero(poly_length);
-        encode_secret_polynomial_to(
-            input_secret_key.as_slice(),
-            encoded_secret.as_mut(),
-            NativeModulus::new(),
-        );
+        NativeModulus::new()
+            .encode_signed_slice_to(input_secret_key.as_slice(), encoded_secret.as_mut());
         let mut data = FourierNlev::zero(parameters.fourier_nlev_len());
         output_secret_key.encrypt_nlev_to(
             &encoded_secret,

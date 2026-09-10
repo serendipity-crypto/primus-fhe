@@ -299,7 +299,7 @@ fn key_generation_supports_small_coefficient_distributions() {
     for distribution in [
         SecretKeyDistr::UniformBinary,
         SecretKeyDistr::SparseTernary,
-        SecretKeyDistr::Gaussian(3.2),
+        SecretKeyDistr::gaussian(3.2),
     ] {
         let ntt_params = NtruParameters::new(
             POLY_LENGTH,
@@ -318,5 +318,40 @@ fn key_generation_supports_small_coefficient_distributions() {
             0.7,
         );
         FourierNtruSecretKey::generate(&fourier_params, &mut fft, &mut rng).unwrap();
+    }
+}
+
+#[test]
+fn parameters_require_secret_support_below_explicit_modulus() {
+    // The support endpoints 12 * sigma are exact integers here. Test both
+    // Gaussian backends at the strict q boundary, independently of sampling.
+    for (sigma, maximum_magnitude) in [(3.0, 36u32), (30.0, 360)] {
+        let distribution = SecretKeyDistr::gaussian(sigma);
+        for q in [maximum_magnitude - 1, maximum_magnitude] {
+            assert!(
+                std::panic::catch_unwind(|| NtruParameters::new(
+                    POLY_LENGTH,
+                    2,
+                    BarrettModulus::new(q),
+                    distribution,
+                    0.7,
+                ))
+                .is_err()
+            );
+        }
+        NtruParameters::new(
+            POLY_LENGTH,
+            2,
+            BarrettModulus::new(maximum_magnitude + 1),
+            distribution,
+            0.7,
+        );
+        NtruParameters::new(
+            POLY_LENGTH,
+            2,
+            NativeModulus::<u32>::new(),
+            distribution,
+            0.7,
+        );
     }
 }

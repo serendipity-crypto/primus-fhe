@@ -21,7 +21,7 @@ const CIPHER_MODULI: [ValueT; 2] = [1_125_899_906_826_241, 1_125_899_906_629_633
 const SECRET_KEY_TYPES: [SecretKeyDistr; 3] = [
     SecretKeyDistr::UniformBinary,
     SecretKeyDistr::SparseTernary,
-    SecretKeyDistr::Gaussian(SECRET_KEY_GAUSSIAN_STANDARD_DEVIATION),
+    SecretKeyDistr::gaussian(SECRET_KEY_GAUSSIAN_STANDARD_DEVIATION),
 ];
 
 /// Construct a deterministic test pattern: m_i = i mod t

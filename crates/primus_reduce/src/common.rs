@@ -1,15 +1,17 @@
-use primus_integer::UnsignedInteger;
+use primus_integer::FheUint;
 
 use super::prelude::*;
 use super::{ExplicitModulus, Modulus};
 
 /// A marker trait indicating the modulus can perform ring operations
-/// (reduce, add, sub, double, neg, mul, mul-add, square, exp, dot-product).
+/// (reduce, add, sub, double, neg, mul, mul-add, square, exp, dot-product)
+/// and bounded signed encoding via [`EncodeSigned`].
 ///
 /// Granted automatically (blanket impl) when the type implements every
-/// listed `Reduce*` trait with `Output = T`.
-pub trait RingContext<T>:
+/// listed `Reduce*` trait with `Output = T`, together with [`EncodeSigned`].
+pub trait RingContext<T: FheUint>:
     Modulus<ValueT = T>
+    + EncodeSigned<T>
     + Reduce<T, Output = T>
     + ReduceAssign<T>
     + ReduceOnce<T, Output = T>
@@ -41,8 +43,9 @@ pub trait RingContext<T>:
 {
 }
 
-impl<T: UnsignedInteger, M> RingContext<T> for M where
+impl<T: FheUint, M> RingContext<T> for M where
     M: Modulus<ValueT = T>
+        + EncodeSigned<T>
         + Reduce<T, Output = T>
         + ReduceAssign<T>
         + ReduceOnce<T, Output = T>
@@ -86,7 +89,7 @@ impl<T: UnsignedInteger, M> RingContext<T> for M where
 /// that every nonzero residue is invertible. Callers must validate any such
 /// algebraic requirements; inverse and division operations retain the failure
 /// behavior documented by their individual traits.
-pub trait FieldContext<T>:
+pub trait FieldContext<T: FheUint>:
     RingContext<T>
     + ExplicitModulus<ValueT = T>
     + LazyReduce<T, Output = T>
@@ -115,7 +118,7 @@ pub trait FieldContext<T>:
 {
 }
 
-impl<T: UnsignedInteger, M> FieldContext<T> for M where
+impl<T: FheUint, M> FieldContext<T> for M where
     M: RingContext<T>
         + ExplicitModulus<ValueT = T>
         + LazyReduce<T, Output = T>

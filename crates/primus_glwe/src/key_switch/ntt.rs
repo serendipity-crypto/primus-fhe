@@ -12,7 +12,6 @@ use primus_ntt::NttTable;
 use primus_poly::{NttPolynomial, PolynomialOwned};
 use primus_reduce::FieldContext;
 
-use crate::secret_key::encode_secret_polynomial_to;
 use crate::{GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext, NttGlweSecretKey};
 
 /// An NTT-domain GLWE key-switching key.
@@ -29,6 +28,12 @@ pub struct NttGlweKeySwitchingKey<T: FheUint> {
 
 impl<T: FheUint> NttGlweKeySwitchingKey<T> {
     /// Generates an NTT GLWE key-switching key.
+    ///
+    /// # Correctness
+    ///
+    /// Every signed coefficient in `input_secret_key` must satisfy `s.unsigned_abs() < q`,
+    /// where `q` is the ciphertext modulus in `domain`; see
+    /// [`EncodeSigned::encode_signed`](primus_reduce::EncodeSigned::encode_signed).
     pub fn generate<M, Table, R>(
         input_secret_key: &GlweSecretKey<T>,
         output_secret_key: &NttGlweSecretKey<T>,
@@ -53,11 +58,9 @@ impl<T: FheUint> NttGlweKeySwitchingKey<T> {
         let mut encoded_secret: PolynomialOwned<T> = PolynomialOwned::zero(output.poly_length());
 
         for (secret_poly, entry) in input_secret_key.iter().zip(data.chunks_exact_mut(glev_len)) {
-            encode_secret_polynomial_to(
-                secret_poly,
-                encoded_secret.as_mut(),
-                output.cipher_modulus().value(),
-            );
+            output
+                .cipher_modulus()
+                .encode_signed_slice_to(secret_poly, encoded_secret.as_mut());
             output_secret_key.encrypt_glev_to(
                 &encoded_secret,
                 &mut NttGlev::new(entry),

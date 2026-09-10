@@ -12,10 +12,10 @@ fn public_batch_matches_independent_matrix_arithmetic() {
     fn check<M: RingContext<u32>>(modulus: M) {
         let q = modulus.explicit_value().map_or(1i128 << 32, i128::from);
         let signed = [-1i128, 0, 1, 2, -2, 1, -1];
-        let params = LweParameters::new(7, 4, modulus, SecretKeyDistr::Gaussian(2.0), 3.2);
+        let params = LweParameters::new(7, 4, modulus, SecretKeyDistr::gaussian(2.0), 3.2);
         let secret = LweSecretKey::new(
             signed.iter().map(|s| s.rem_euclid(q) as u32).collect(),
-            SecretKeyDistr::Gaussian(2.0),
+            SecretKeyDistr::gaussian(2.0),
         );
         let mut rng = StdRng::seed_from_u64(0x1_ee26);
         let public = LwePublicKey::generate(&secret, &params, &mut rng);
