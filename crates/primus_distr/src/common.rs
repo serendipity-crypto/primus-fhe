@@ -1,7 +1,7 @@
 use std::slice::IterMut;
 
 use num_traits::ConstZero;
-use primus_integer::{FheInt, FheUint, SignedInteger, UnsignedInteger};
+use primus_integer::{FheInt, FheUint, Integer, SignedInteger, UnsignedInteger};
 use rand::{
     distr::{Bernoulli, Distribution, Uniform},
     seq::SliceRandom,
@@ -129,10 +129,12 @@ pub fn sample_fixed_hamming_weight_binary_values_to<T, R>(
 /// Samples sparse ternary values.
 ///
 /// Values have probabilities `P(0) = 1/2` and `P(1) = P(-1) = 1/4`.
-/// `minus_one` encodes `-1`.
+/// `minus_one` encodes `-1`. Uses [`sample_sparse_ternary_values_to`]'s
+/// packed random-word order.
+#[must_use]
 pub fn sample_sparse_ternary_values<T, R>(minus_one: T, length: usize, rng: &mut R) -> Vec<T>
 where
-    T: FheInt,
+    T: Integer,
     R: rand::Rng + rand::CryptoRng,
 {
     let mut v = vec![T::ZERO; length];
@@ -144,9 +146,12 @@ where
 ///
 /// Values have probabilities `P(0) = 1/2` and `P(1) = P(-1) = 1/4`.
 /// `minus_one` encodes `-1`.
+/// Each `next_u32()` supplies sixteen low-to-high two-bit groups, mapped to
+/// `[0, 0, 1, minus_one]`. Consumes exactly `result.len().div_ceil(16)` words;
+/// unused high bits are discarded, and empty output consumes no randomness.
 pub fn sample_sparse_ternary_values_to<T, R>(result: &mut [T], minus_one: T, rng: &mut R)
 where
-    T: FheInt,
+    T: Integer,
     R: rand::Rng + rand::CryptoRng,
 {
     let s = [T::ZERO, T::ZERO, T::ONE, minus_one];
@@ -159,10 +164,12 @@ where
             r >>= 2;
         }
     }
-    let mut r = rng.next_u32();
-    for elem in remainder {
-        *elem = s[(r & 0b11) as usize];
-        r >>= 2;
+    if !remainder.is_empty() {
+        let mut r = rng.next_u32();
+        for elem in remainder {
+            *elem = s[(r & 0b11) as usize];
+            r >>= 2;
+        }
     }
 }
 

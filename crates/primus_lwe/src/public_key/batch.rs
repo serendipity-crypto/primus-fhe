@@ -1,12 +1,15 @@
-use super::LwePublicKey;
+use super::{LwePublicKey, ROWS_PER_BLOCK};
 use crate::batch::{batch_len, check_batch};
 use crate::{LweParameters, PlaintextEmbedding};
-use primus_distr::DiscreteGaussian;
-use primus_distr::SparseTernaryDistr;
+use primus_distr::{DiscreteGaussian, sample_sparse_ternary_values_to};
 use primus_integer::FheUint;
 use primus_lattice::lwe::LweIterMut;
 use primus_reduce::RingContext;
 use rand::distr::Distribution;
+
+// At u32 dimensions 512/1024, 8 outperformed 4, while 16 lost cache
+// locality at 1024. Keep this internal; remeasure with benches/public_key.rs.
+const TILE_COUNT: usize = 8;
 
 impl<T: FheUint> LwePublicKey<T> {
     /// Encrypts independent messages with unsigned embedding in one allocation.
@@ -193,9 +196,6 @@ impl<T: FheUint> LwePublicKey<T> {
         M: RingContext<T>,
         R: rand::Rng + rand::CryptoRng,
     {
-        // At u32 dimensions 512/1024, 8 outperformed 4, while 16 lost cache
-        // locality at 1024. Keep this internal; remeasure with benches/public_key.rs.
-        const TILE_COUNT: usize = 8;
         let row_len = self.dimension + 1;
         // Clamp before multiplication: even enormous dimensions cannot overflow
         // the tile length when a smaller output fits the validated allocation.
@@ -217,6 +217,9 @@ impl<T: FheUint> LwePublicKey<T> {
 
     /// Encrypts the encoded bodies in one validated tile. Separating this
     /// kernel keeps message-iterator state out of sampling and row accumulation.
+    /// The tile contains 1..=TILE_COUNT ciphertexts. Sample all its Gaussian
+    /// errors first, then ternary coefficients in row-major/ciphertext order.
+    /// Discard unused random bits before the next tile's Gaussian sampling.
     fn encrypt_tile_bodies_assign<M, R>(
         &self,
         tile: &mut [T],
@@ -233,13 +236,23 @@ impl<T: FheUint> LwePublicKey<T> {
             noise.sample_to(mask, rng);
             modulus.reduce_add_assign(body, noise.sample(rng));
         }
-        let ephemeral = SparseTernaryDistr::<i8>::new(-1);
-        for row in self.data.chunks_exact(row_len) {
-            for ciphertext in tile.chunks_exact_mut(row_len) {
-                match ephemeral.sample(rng) {
-                    1 => modulus.reduce_add_slice_assign(ciphertext, row),
-                    -1 => modulus.reduce_sub_slice_assign(ciphertext, row),
-                    _ => {}
+        let tile_count = tile.len() / row_len;
+        let block_len = self.dimension.min(ROWS_PER_BLOCK) * row_len;
+        let mut ephemeral = [0i8; ROWS_PER_BLOCK * TILE_COUNT];
+        for rows in self.data.chunks(block_len) {
+            // Sixteen rows use whole words even for a short ciphertext tile.
+            let coefficients = &mut ephemeral[..rows.len() / row_len * tile_count];
+            sample_sparse_ternary_values_to(coefficients, -1, rng);
+            for (row, coefficients) in rows
+                .chunks_exact(row_len)
+                .zip(coefficients.chunks_exact(tile_count))
+            {
+                for (ciphertext, &coefficient) in tile.chunks_exact_mut(row_len).zip(coefficients) {
+                    match coefficient {
+                        1 => modulus.reduce_add_slice_assign(ciphertext, row),
+                        -1 => modulus.reduce_sub_slice_assign(ciphertext, row),
+                        _ => {}
+                    }
                 }
             }
         }

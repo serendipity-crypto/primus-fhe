@@ -3,13 +3,15 @@
 mod batch;
 
 use primus_data::DataMut;
-use primus_distr::{DiscreteGaussian, SparseTernaryDistr};
+use primus_distr::{DiscreteGaussian, sample_sparse_ternary_values_to};
 use primus_integer::FheUint;
 use primus_lattice::lwe::Lwe;
 use primus_reduce::RingContext;
-use rand::distr::Distribution;
 
 use crate::{LweCiphertext, LweParameters, LweSecretKey, PlaintextEmbedding};
+
+// A full row block consumes whole random words for any ciphertext tile count.
+const ROWS_PER_BLOCK: usize = 16;
 
 /// A Lindner–Peikert-style public key `(A, b = A s + e)` with square `A`.
 ///
@@ -28,6 +30,9 @@ use crate::{LweCiphertext, LweParameters, LweSecretKey, PlaintextEmbedding};
 /// The square-matrix construction follows
 /// [Lindner and Peikert](https://eprint.iacr.org/2010/613), with the ephemeral
 /// distribution fixed to the sparse ternary law above.
+/// Encryption packs sixteen ephemeral coefficients per random word. Unused
+/// bits are discarded after each ciphertext or batch tile; seeded ciphertext
+/// bytes are not guaranteed to remain identical across library versions.
 ///
 /// # Correctness
 ///
@@ -306,7 +311,8 @@ impl<T: FheUint> LwePublicKey<T> {
     /// Interleaved bodies let one slice kernel accumulate both `A^T r` and
     /// `b^T r`, without a transpose, temporary secret vector, or extra pass.
     /// Ternary coefficients select addition, subtraction, or no work once per
-    /// row, outside the slice kernel's coefficient loop.
+    /// row, outside the slice kernel's coefficient loop. Gaussian errors are
+    /// sampled first, then packed ternary coefficients in matrix-row order.
     fn encrypt_encoded_slice<M, R>(
         &self,
         plaintext: T,
@@ -320,12 +326,19 @@ impl<T: FheUint> LwePublicKey<T> {
     {
         noise.sample_to(output, rng);
         modulus.reduce_add_assign(&mut output[self.dimension], plaintext);
-        let ephemeral = SparseTernaryDistr::<i8>::new(-1);
-        for row in self.data.chunks_exact(self.dimension + 1) {
-            match ephemeral.sample(rng) {
-                1 => modulus.reduce_add_slice_assign(output, row),
-                -1 => modulus.reduce_sub_slice_assign(output, row),
-                _ => {}
+        let row_len = self.dimension + 1;
+        // Clamping keeps the block length within the validated key allocation.
+        let block_len = self.dimension.min(ROWS_PER_BLOCK) * row_len;
+        let mut ephemeral = [0i8; ROWS_PER_BLOCK];
+        for rows in self.data.chunks(block_len) {
+            let coefficients = &mut ephemeral[..rows.len() / row_len];
+            sample_sparse_ternary_values_to(coefficients, -1, rng);
+            for (row, &coefficient) in rows.chunks_exact(row_len).zip(coefficients.iter()) {
+                match coefficient {
+                    1 => modulus.reduce_add_slice_assign(output, row),
+                    -1 => modulus.reduce_sub_slice_assign(output, row),
+                    _ => {}
+                }
             }
         }
     }

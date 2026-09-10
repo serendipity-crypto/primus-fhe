@@ -111,9 +111,17 @@ fn check_equations<T: FheUint, M: RingContext<T>>(modulus: M) {
                     .zip(&signed_secret)
                     .map(|(&e, &s)| e * s)
                     .sum::<i128>();
-            for (row, &error) in key.as_slice().chunks_exact(dimension + 1).zip(&key_errors) {
+            let words: Vec<u32> = (0..dimension.div_ceil(16))
+                .map(|_| oracle_rng.next_u32())
+                .collect();
+            for (i, (row, &error)) in key
+                .as_slice()
+                .chunks_exact(dimension + 1)
+                .zip(&key_errors)
+                .enumerate()
+            {
                 // Independent spelling of Pr[0] = 1/2, Pr[+/-1] = 1/4.
-                let r = match oracle_rng.next_u32() & 3 {
+                let r = match (words[i / 16] >> (2 * (i % 16))) & 3 {
                     0 | 1 => 0,
                     2 => 1,
                     _ => -1,

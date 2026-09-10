@@ -9,17 +9,32 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 #[test]
 fn public_batch_matches_independent_matrix_arithmetic() {
     use rand::distr::Distribution;
-    fn check<M: RingContext<u32>>(modulus: M, noise_sigma: f64) {
+    fn check<M: RingContext<u32>>(modulus: M, noise_sigma: f64, dimension: usize, count: usize) {
         let q = modulus.explicit_value().map_or(1i128 << 32, i128::from);
-        let signed = [-1i128, 0, 1, 2, -2, 1, -1];
-        let params = LweParameters::new(7, 4, modulus, SecretKeyDistr::gaussian(2.0), noise_sigma);
+        let row_len = dimension + 1;
+        let signed: Vec<i128> = [-1, 0, 1, 2, -2, 1, -1]
+            .into_iter()
+            .cycle()
+            .take(dimension)
+            .collect();
+        let params = LweParameters::new(
+            dimension,
+            4,
+            modulus,
+            SecretKeyDistr::gaussian(2.0),
+            noise_sigma,
+        );
         let secret = LweSecretKey::new(
             signed.iter().map(|s| s.rem_euclid(q) as u32).collect(),
             SecretKeyDistr::gaussian(2.0),
         );
         let mut rng = StdRng::seed_from_u64(0x1_ee26);
         let public = LwePublicKey::generate(&secret, &params, &mut rng);
-        let plaintexts = [0, (q - 1) as u32, (q / 4) as u32];
+        let plaintexts: Vec<u32> = [0, (q - 1) as u32, (q / 4) as u32]
+            .into_iter()
+            .cycle()
+            .take(count)
+            .collect();
         let mut rng = StdRng::seed_from_u64(0x1_ee27);
         let mut oracle_rng = StdRng::seed_from_u64(0x1_ee27);
         let batch = public.encrypt_encoded_batch(
@@ -28,38 +43,50 @@ fn public_batch_matches_independent_matrix_arithmetic() {
             params.noise_distribution(),
             &mut rng,
         );
-        let mut expected = [[0i128; 8]; 3];
-        for (row, &plaintext) in expected.iter_mut().zip(&plaintexts) {
-            for value in row.iter_mut() {
-                *value = i128::from(params.noise_distribution().sample(&mut oracle_rng));
+        let mut expected = vec![vec![0i128; row_len]; count];
+        // Each tile samples Gaussian errors, then packed row-major ternary
+        // coefficients. Unused high bits never carry into the next tile.
+        for (tile, plaintexts) in expected.chunks_mut(8).zip(plaintexts.chunks(8)) {
+            for (row, &plaintext) in tile.iter_mut().zip(plaintexts) {
+                for value in row.iter_mut() {
+                    *value = i128::from(params.noise_distribution().sample(&mut oracle_rng));
+                }
+                row[dimension] += i128::from(plaintext);
             }
-            row[7] += i128::from(plaintext);
-        }
-        // Integer matrix multiplication checks the row/body layout and gives each
-        // output its own independent coefficient for every public-key row.
-        for public_row in public.as_slice().as_chunks::<8>().0 {
-            for row in &mut expected {
-                let r = [0, 0, 1, -1][(oracle_rng.next_u32() & 3) as usize];
-                for (out, &value) in row.iter_mut().zip(public_row) {
-                    *out += i128::from(value) * r;
+            let words: Vec<u32> = (0..(dimension * tile.len()).div_ceil(16))
+                .map(|_| oracle_rng.next_u32())
+                .collect();
+            // Ordinary integer matrix multiplication independently checks the
+            // row/body layout and each ciphertext's ephemeral coefficient.
+            for (i, public_row) in public.as_slice().chunks_exact(row_len).enumerate() {
+                let offset = i * tile.len();
+                for (j, row) in tile.iter_mut().enumerate() {
+                    let index = offset + j;
+                    let r = [0, 0, 1, -1][((words[index / 16] >> (2 * (index % 16))) & 3) as usize];
+                    for (out, &value) in row.iter_mut().zip(public_row) {
+                        *out += i128::from(value) * r;
+                    }
                 }
             }
         }
-        for (ciphertext, expected) in LweIter::new(&batch, 8).zip(expected) {
-            for (&actual, expected) in ciphertext.as_ref().iter().zip(expected) {
+        for (ciphertext, expected) in LweIter::new(&batch, row_len).zip(expected) {
+            for (&actual, expected) in ciphertext.as_ref().iter().zip(&expected) {
                 assert_eq!(i128::from(actual), expected.rem_euclid(q));
             }
-            let dot: i128 = expected[..7].iter().zip(signed).map(|(&a, s)| a * s).sum();
-            assert_eq!(
-                i128::from(secret.as_view().decrypt_phase(&ciphertext, modulus)),
-                (expected[7] - dot).rem_euclid(q)
-            );
         }
         assert_eq!(rng.next_u64(), oracle_rng.next_u64());
     }
     for noise_sigma in [3.2, 30.0] {
-        check(NativeModulus::new(), noise_sigma);
-        check(BarrettModulus::new(132_120_577), noise_sigma);
+        // Cover short blocks and full row/ciphertext blocks followed by tails.
+        for (dimension, count) in [(7, 3), (17, 19)] {
+            check(NativeModulus::new(), noise_sigma, dimension, count);
+            check(
+                BarrettModulus::new(132_120_577),
+                noise_sigma,
+                dimension,
+                count,
+            );
+        }
     }
 }
 

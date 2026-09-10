@@ -31,6 +31,20 @@ impl TryRng for Words {
 impl TryCryptoRng for Words {}
 
 #[test]
+fn sparse_ternary_preserves_bit_order_and_random_word_count() {
+    // Low-to-high pairs from 0xe4e4_1b1b, followed by the low pair of 2.
+    let expected = [-1i8, 1, 0, 0, -1, 1, 0, 0, 0, 0, 1, -1, 0, 0, 1, -1, 1];
+    for length in [0usize, 1, 15, 16, 17] {
+        let script = [0xe4e4_1b1bu64, 2][..length.div_ceil(16)].to_vec();
+        let mut rng = Words(script.into_iter());
+        let mut output = vec![19i8; length];
+        sample_sparse_ternary_values_to(&mut output, -1, &mut rng);
+        assert_eq!(output, expected[..length]);
+        assert!(rng.0.next().is_none());
+    }
+}
+
+#[test]
 fn ternary_threshold_boundaries_and_public_validation() {
     let quarter = 1u64 << 62;
     for (negative, positive, words, expected) in [

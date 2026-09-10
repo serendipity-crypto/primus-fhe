@@ -169,6 +169,9 @@ LWE batch APIs reject them.
 - Secret-key batching reuses single-message encryption. Public-key batching
   processes small tiles to reuse matrix rows; its RNG order need not match a
   loop of single encryptions. Empty independent batches consume no randomness.
+- Public-key encryption packs 16 ephemeral ternary coefficients per random
+  word and discards unused bits after each ciphertext or batch tile. Fixed seeds
+  do not guarantee identical ciphertext bytes across library versions.
 - Batch boundaries validate complete buffer lengths before processing. Invalid
   messages or RNG failures can leave partial output and consume randomness.
 
