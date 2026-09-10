@@ -448,3 +448,46 @@ where
 
     result
 }
+
+/// Computes a dot product with bounded signed right-hand coefficients.
+///
+/// # Correctness
+///
+/// The modulus must satisfy `1 < q < 2^(T::BITS - 2)`. Inputs must satisfy
+/// [`ReduceDotProductSigned::reduce_dot_product_signed`]'s canonical-residue and
+/// signed-magnitude contracts. The modulus must implement canonical two-limb reduction.
+///
+/// # Panics
+///
+/// Panics if the slices have different lengths.
+#[must_use]
+#[inline]
+pub fn reduce_dot_product_signed<T, M>(modulus: M, lhs: &[T], rhs: &[T::SignedInteger]) -> T
+where
+    T: FheUint,
+    M: EncodeSigned<T> + Reduce<[T; 2], Output = T> + ReduceAddAssign<T>,
+{
+    assert_eq!(
+        lhs.len(),
+        rhs.len(),
+        "reduce_dot_product_signed: length mismatch"
+    );
+    dot_product_signed(modulus, lhs, rhs)
+}
+
+/// Scalar kernel after equal lengths and the public entry's range contracts
+/// have been established. Keep the fused iterator kernel: a separate fixed-block
+/// signed loop measured slower for scalar u64 Barrett dot products. Encoding
+/// before widening preserves the existing 16-product accumulator bound.
+#[inline]
+pub(crate) fn dot_product_signed<T, M>(modulus: M, lhs: &[T], rhs: &[T::SignedInteger]) -> T
+where
+    T: FheUint,
+    M: EncodeSigned<T> + Reduce<[T; 2], Output = T> + ReduceAddAssign<T>,
+{
+    reduce_dot_product_iter(
+        modulus,
+        lhs.iter().copied(),
+        rhs.iter().copied().map(|s| modulus.encode_signed(s)),
+    )
+}

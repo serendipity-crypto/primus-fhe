@@ -1,7 +1,10 @@
 //! SIMD Barrett modulus implementation and dot-product helper.
 
+use core::simd::cmp::SimdPartialOrd;
+
 use primus_integer::{
-    CarryingAdd, CarryingMul, SimdArray, SimdUnsignedArray, SimdUnsignedInteger, WideningMul,
+    CarryingAdd, CarryingMul, FheUint, SimdArray, SimdInteger, SimdMaskArray, SimdUnsignedArray,
+    SimdUnsignedInteger, WideningMul,
 };
 use primus_reduce::prelude::*;
 
@@ -250,4 +253,70 @@ where
         compact::slice::reduce_dot_product(modulus, a_outer.remainder(), b_outer.remainder());
 
     modulus.reduce_add(result, tail_result)
+}
+
+/// Computes a mixed signed dot product with scalar/SIMD dispatch.
+///
+/// # Correctness
+///
+/// The scalar modulus and its SIMD conversion must agree and satisfy
+/// `1 < q < 2^(T::BITS - 2)`. Inputs must satisfy
+/// [`ReduceDotProductSigned::reduce_dot_product_signed`]'s range contracts.
+/// The scalar context must implement canonical two-limb reduction.
+///
+/// # Panics
+///
+/// Panics if the slices have different lengths.
+#[must_use]
+#[inline]
+pub fn simd_reduce_dot_product_signed<T: FheUint, M>(
+    modulus: M,
+    lhs: &[T],
+    rhs: &[T::SignedInteger],
+) -> T
+where
+    M: EncodeSigned<T>
+        + Into<SimdBarrettModulus<T>>
+        + ReduceAdd<T, Output = T>
+        + ReduceAddAssign<T>
+        + Reduce<[T; 2], Output = T>,
+{
+    assert_eq!(
+        lhs.len(),
+        rhs.len(),
+        "reduce_dot_product_signed: length mismatch"
+    );
+    let outer = compact::DOT_PRODUCT_INNER_CHUNK * T::LANE_COUNT;
+    if lhs.len() < outer {
+        return compact::slice::dot_product_signed(modulus, lhs, rhs);
+    }
+    let sm: SimdBarrettModulus<T> = modulus.into();
+    let mv = sm.value;
+    let signed_max = T::SimdT::splat(T::MAX >> 1u32);
+    let mut total_acc = T::SimdT::splat(T::ZERO);
+    let mut lhs_outer = lhs.chunks_exact(outer);
+    let mut rhs_outer = rhs.chunks_exact(outer);
+    for (lhs, rhs) in (&mut lhs_outer).zip(&mut rhs_outer) {
+        let (lhs_lanes, _) = T::simd_as_chunks(lhs);
+        let (rhs_lanes, _) = T::SignedInteger::simd_as_chunks(rhs);
+        let mut acc = [T::SimdT::splat(T::ZERO); 2];
+        for (lhs, rhs) in lhs_lanes.iter().zip(rhs_lanes) {
+            let a = T::SimdT::from_array(*lhs);
+            let s = <T::SignedInteger as SimdInteger>::SimdT::from_array(*rhs);
+            let bits = T::simd_cast_from_signed(s);
+            // Only negative lanes add q. Wrapping addition gives q + s in
+            // [0, q), keeping the unsigned kernel's 16-product bound intact.
+            let encoded = bits.simd_gt(signed_max).select(bits + mv, bits);
+            compact::simd::multiply_add::<T>(&mut acc, a, encoded);
+        }
+        let block = compact::simd::reduce_once::<T>(mv, sm.lazy_reduce_wide(acc[0], acc[1]));
+        total_acc = compact::simd::reduce_add::<T>(mv, total_acc, block);
+    }
+    let mut result = T::ZERO;
+    for lane in total_acc.to_array() {
+        result = modulus.reduce_add(result, lane);
+    }
+    let tail =
+        compact::slice::dot_product_signed(modulus, lhs_outer.remainder(), rhs_outer.remainder());
+    modulus.reduce_add(result, tail)
 }

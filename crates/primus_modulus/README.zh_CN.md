@@ -61,6 +61,7 @@ assert_eq!(output, [11, 6, 50]);
 - 底层切片内核可能只用 `debug_assert*!` 诊断形状问题；release 调用方必须维持文档中的长度契约。
 - `FieldContext` 是能力 marker；它不证明模数为素数，也不保证每个非零值都可逆。
 - `EncodeSigned` 转换无符号幅度小于显式模数的系数；Native 接受所有 signed 值。Native 保留位模式，PowOf2 使用掩码，Uint/Compact/Barrett 共享显式模数转换。默认切片方法统一检查一次等长，再使用具体类型的标量实现。
+- `ReduceDotProductSigned` 为 Native、PowOf2、Barrett 及派生 Barrett 融合有界 signed 编码与点积。入口统一检查等长，空切片返回零。Barrett 在宽累加前完成编码，保持 16 项乘积的累加界；SIMD 处理完整块，尾部走标量内核。
 
 ## 许可证
 

@@ -113,7 +113,8 @@ fn main() {
 单条私钥 raw 操作通过 `secret.as_view()` 调用：`encrypt_encoded` /
 `encrypt_encoded_to` 接受已编码的剩余类、模数、均匀采样器、噪声采样器和 RNG；
 `decrypt_phase` 返回 `b - <a,s>`，不进行解码。向 raw 加密传入零会得到随机化的零密文。
-`LweSecretKeyRef::Signed` 直接借用有符号系数，不分配 Encoded 副本。
+`LweSecretKeyRef::Signed` 直接借用有符号系数，不分配 Encoded 副本。点积调用模数后端的
+`ReduceDotProductSigned` 实现，将表示转换与乘法融合。
 显式模数下要求 `-q < s_i < q`；Native 模数下允许所有有符号值。
 Raw 采样器必须使用相同模数。这些范围及采样器约定是调用方前提。
 

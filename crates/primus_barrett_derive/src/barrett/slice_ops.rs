@@ -139,7 +139,18 @@ pub(crate) fn slice_ops(name: &Ident, modulus: &TokenStream, ty: &syn::Path) -> 
             }
         }
 
-        // ReduceDotProduct
+        impl ::primus_modulus::reduce::ReduceDotProductSigned<#ty> for #name {
+            #[inline]
+            fn reduce_dot_product_signed(
+                self,
+                lhs: &[#ty],
+                rhs: &[<#ty as ::primus_modulus::integer::UnsignedInteger>::SignedInteger],
+            ) -> #ty {
+                ::primus_modulus::common::compact::slice::reduce_dot_product_signed(self, lhs, rhs)
+            }
+        }
+
+        // Ordinary dot product
         impl ::primus_modulus::reduce::ReduceDotProduct<#ty> for #name {
             #[inline]
             fn reduce_dot_product(self, a: &[#ty], b: &[#ty]) -> #ty {
@@ -330,7 +341,18 @@ pub(crate) fn slice_ops(name: &Ident, modulus: &TokenStream, ty: &syn::Path) -> 
             }
         }
 
-        // ReduceDotProduct
+        impl ::primus_modulus::reduce::ReduceDotProductSigned<#ty> for #name {
+            #[inline]
+            fn reduce_dot_product_signed(
+                self,
+                lhs: &[#ty],
+                rhs: &[<#ty as ::primus_modulus::integer::UnsignedInteger>::SignedInteger],
+            ) -> #ty {
+                ::primus_modulus::barrett_simd_reduce_dot_product_signed(self, lhs, rhs)
+            }
+        }
+
+        // Ordinary dot product
         impl ::primus_modulus::reduce::ReduceDotProduct<#ty> for #name {
             #[inline]
             fn reduce_dot_product(self, a: &[#ty], b: &[#ty]) -> #ty {

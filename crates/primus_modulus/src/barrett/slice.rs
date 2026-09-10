@@ -1,3 +1,8 @@
+use primus_integer::FheUint;
+use primus_reduce::ReduceDotProductSigned;
+
+use super::BarrettModulus;
+
 #[cfg(not(feature = "simd"))]
 mod basic {
     use primus_integer::FheUint;
@@ -560,6 +565,20 @@ mod inv {
             }
 
             Ok(())
+        }
+    }
+}
+
+impl<T: FheUint> ReduceDotProductSigned<T> for BarrettModulus<T> {
+    #[inline]
+    fn reduce_dot_product_signed(self, lhs: &[T], rhs: &[T::SignedInteger]) -> T {
+        #[cfg(not(feature = "simd"))]
+        {
+            crate::common::compact::slice::reduce_dot_product_signed(self, lhs, rhs)
+        }
+        #[cfg(feature = "simd")]
+        {
+            crate::barrett_simd_reduce_dot_product_signed(self, lhs, rhs)
         }
     }
 }

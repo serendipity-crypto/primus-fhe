@@ -1,6 +1,98 @@
 use primus_integer::{AsFrom, AsInto, FheUint};
 use primus_modulus::{BarrettModulus, CompactModulus, NativeModulus, PowOf2Modulus, UintModulus};
-use primus_reduce::EncodeSigned;
+use primus_reduce::{EncodeSigned, Modulus, ReduceDotProductSigned};
+
+#[test]
+fn signed_dot_products_match_integer_remainders() {
+    fn check<T: FheUint>(modulus: impl Modulus<ValueT = T> + ReduceDotProductSigned<T>) {
+        let q = modulus
+            .explicit_value()
+            .map_or(1i128 << T::BITS, |q| q.as_into());
+        let lo = (-(1i128 << (T::BITS - 1))).max(1 - q);
+        let hi = ((1i128 << (T::BITS - 1)) - 1).min(q - 1);
+        let mut lengths = vec![0, 1, 15, 16, 17, 805];
+        #[cfg(feature = "simd")]
+        for boundary in [T::LANE_COUNT, 16 * T::LANE_COUNT, 32 * T::LANE_COUNT] {
+            lengths.extend([boundary - 1, boundary, boundary + 1]);
+        }
+        lengths.sort_unstable();
+        lengths.dedup();
+        for len in lengths {
+            // The first case maximizes each encoded product, exercising the
+            // two-limb accumulator at the largest supported Barrett modulus.
+            for mixed in [false, true] {
+                let lhs: Vec<T> = (0..len)
+                    .map(|i| {
+                        T::as_from(if mixed {
+                            [0, 1, q / 2, q - 2, q - 1][i % 5]
+                        } else {
+                            q - 1
+                        })
+                    })
+                    .collect();
+                let rhs: Vec<T::SignedInteger> = (0..len)
+                    .map(|i| {
+                        T::SignedInteger::as_from(if mixed {
+                            [lo, hi, -1, 0, 1][(i / 5 + i) % 5]
+                        } else {
+                            -1
+                        })
+                    })
+                    .collect();
+                // An individual u64 * i64 product fits i128. Reduce each term
+                // before adding so the oracle cannot overflow on long inputs.
+                let expected = lhs.iter().zip(&rhs).fold(0i128, |acc, (&a, &s)| {
+                    let a: i128 = a.as_into();
+                    let s: i128 = s.as_into();
+                    (acc + (a * s).rem_euclid(q)) % q
+                });
+                assert_eq!(
+                    modulus.reduce_dot_product_signed(&lhs, &rhs),
+                    T::as_from(expected),
+                    "q={q}, len={len}, mixed={mixed}"
+                );
+            }
+        }
+        for (lhs, rhs) in [
+            (&[T::ZERO][..], &[][..]),
+            (&[][..], &[T::SignedInteger::as_from(0i32)][..]),
+        ] {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    modulus.reduce_dot_product_signed(lhs, rhs)
+                }))
+                .is_err()
+            );
+        }
+    }
+    fn check_moduli<T: FheUint>() {
+        check(NativeModulus::<T>::new());
+        for q in [T::as_from(2u32), T::ONE << (T::BITS - 1)] {
+            check(PowOf2Modulus::new(q));
+        }
+        for q in [
+            T::as_from(2u32),
+            T::as_from(97u32),
+            (T::ONE << (T::BITS - 2)) - T::ONE,
+        ] {
+            check(BarrettModulus::new(q));
+        }
+    }
+    check_moduli::<u16>();
+    check_moduli::<u32>();
+    check_moduli::<u64>();
+    #[cfg(feature = "derive")]
+    {
+        #[derive(primus_modulus::Barrett)]
+        #[modulus(ty = u32, value = 97)]
+        struct SmallModulus;
+        #[derive(primus_modulus::Barrett)]
+        #[modulus(ty = u64, value = 4611686018427387903)]
+        struct WideModulus;
+        check(SmallModulus);
+        check(WideModulus);
+    }
+}
 
 #[test]
 fn bounded_signed_encoding_matches_integer_remainders() {

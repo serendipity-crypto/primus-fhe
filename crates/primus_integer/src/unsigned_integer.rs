@@ -58,9 +58,8 @@ pub trait UnsignedInteger:
     ///
     /// Performs a width-preserving bit-pattern cast (`value as Self`), so
     /// negative values become their two's-complement unsigned encoding (for
-    /// example `-1i64` maps to `u64::MAX`). This is the inverse of
-    /// [`wrapping_add_signed`](Self::wrapping_add_signed) when interpreting
-    /// the result modulo `2^BITS`.
+    /// example `-1i64` maps to `u64::MAX`). This is equivalent to
+    /// `Self::ZERO.wrapping_add_signed(value)` modulo `2^BITS`.
     #[must_use]
     fn cast_from_signed(value: Self::SignedInteger) -> Self;
 

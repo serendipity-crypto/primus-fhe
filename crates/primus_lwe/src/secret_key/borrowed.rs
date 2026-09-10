@@ -153,9 +153,8 @@ impl<T: FheUint> LweSecretKeyRef<'_, T> {
         modulus.reduce_sub(*body, self.dot_product(mask, modulus))
     }
 
-    /// Selects key representation outside the coefficient loop. Signed encoding
-    /// does not dispatch on modulus shape, and encoded slice dot products retain
-    /// the modulus backend's SIMD dispatch.
+    /// Selects the key representation once; the modulus backend owns encoding
+    /// and scalar/SIMD dot-product dispatch.
     #[inline]
     fn dot_product<M>(self, mask: &[T], modulus: M) -> T
     where
@@ -163,17 +162,7 @@ impl<T: FheUint> LweSecretKeyRef<'_, T> {
     {
         match self {
             Self::Encoded(key) => modulus.reduce_dot_product(mask, key),
-            Self::Signed(key) => {
-                assert_eq!(
-                    mask.len(),
-                    key.len(),
-                    "LWE mask dimension must match the secret key"
-                );
-                modulus.reduce_dot_product_iter(
-                    mask.iter().copied(),
-                    key.iter().copied().map(|s| modulus.encode_signed(s)),
-                )
-            }
+            Self::Signed(key) => modulus.reduce_dot_product_signed(mask, key),
         }
     }
 }

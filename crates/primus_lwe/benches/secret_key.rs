@@ -2,7 +2,10 @@
 // Retain separate allocating/in-place kernels, encoded/signed dot products,
 // and the packed rotated-dot kernel; sampler/codec microbenchmarks live below LWE.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{
+    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
+};
+use primus_integer::{AsFrom, FheUint};
 use primus_lwe::{LweCiphertext, LweParameters, LweSecretKey, LweSecretKeyRef, SecretKeyDistr};
 use primus_modulus::{BarrettModulus, NativeModulus};
 use primus_reduce::RingContext;
@@ -14,39 +17,14 @@ fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M, 
     let params = LweParameters::new(dimension, 4, modulus, SecretKeyDistr::UniformBinary, 0.7);
     let sk = LweSecretKey::generate(&params, &mut rng);
     let signed: Vec<i32> = (0..dimension).map(|i| (i % 3) as i32 - 1).collect();
-    let encoded_key: Vec<u32> = signed.iter().map(|&s| modulus.encode_signed(s)).collect();
     let plaintext = params
         .plaintext_codec()
         .encode_value(1u32, primus_encoding::PlaintextEmbedding::Unsigned);
-    let cipher = LweSecretKeyRef::Signed(&signed).encrypt_encoded(
-        plaintext,
-        modulus,
-        params.cipher_modulus_uniform_distr(),
-        params.noise_distribution(),
-        &mut rng,
-    );
     let mut group = c.benchmark_group(format!("lwe/u32/{name}/n{dimension}"));
     group.bench_function("encrypt_allocating", |b| {
         b.iter(|| sk.encrypt(black_box(1u32), black_box(&params), &mut rng))
     });
-    // Compare the same phase operation, ciphertext and logical key; encoding
-    // the reusable key happens outside the timed closure.
-    group.bench_function("encoded_phase", |b| {
-        b.iter(|| {
-            black_box(
-                LweSecretKeyRef::Encoded(black_box(&encoded_key))
-                    .decrypt_phase(black_box(&cipher), black_box(modulus)),
-            )
-        })
-    });
-    group.bench_function("signed_phase", |b| {
-        b.iter(|| {
-            black_box(
-                LweSecretKeyRef::Signed(black_box(&signed))
-                    .decrypt_phase(black_box(&cipher), black_box(modulus)),
-            )
-        })
-    });
+    bench_phases(&mut group, &params);
     let mut output = LweCiphertext::zero(dimension);
     group.bench_function("encrypt_to", |b| {
         b.iter(|| {
@@ -78,11 +56,66 @@ fn bench_domain<M: RingContext<u32>>(c: &mut Criterion, name: &str, modulus: M, 
     });
     group.finish();
 }
+
+// Compare the same phase, ciphertext and logical key. Encoding a reusable key
+// stays outside timing. Both word widths matter for widening SIMD arithmetic.
+fn bench_phases<T: FheUint, M: RingContext<T>>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    params: &LweParameters<T, M>,
+) {
+    let modulus = params.cipher_modulus();
+    let signed: Vec<T::SignedInteger> = (0..params.dimension())
+        .map(|i| T::SignedInteger::as_from((i % 3) as i32 - 1))
+        .collect();
+    let encoded: Vec<T> = signed.iter().map(|&s| modulus.encode_signed(s)).collect();
+    let cipher = LweSecretKeyRef::Signed(&signed).encrypt_encoded(
+        T::ZERO,
+        modulus,
+        params.cipher_modulus_uniform_distr(),
+        params.noise_distribution(),
+        &mut StdRng::seed_from_u64(0x1_ee01),
+    );
+    group.bench_function("encoded_phase", |b| {
+        b.iter(|| {
+            LweSecretKeyRef::Encoded(black_box(&encoded))
+                .decrypt_phase(black_box(&cipher), black_box(modulus))
+        })
+    });
+    group.bench_function("signed_phase", |b| {
+        b.iter(|| {
+            LweSecretKeyRef::Signed(black_box(&signed))
+                .decrypt_phase(black_box(&cipher), black_box(modulus))
+        })
+    });
+}
+
 fn secret_key(c: &mut Criterion) {
     // Keep the aligned baseline and a non-power-of-two mask with a SIMD tail.
     for dimension in [512, 805] {
         bench_domain(c, "native", NativeModulus::new(), dimension);
         bench_domain(c, "explicit", BarrettModulus::new(132_120_577), dimension);
+        let params = LweParameters::new(
+            dimension,
+            4u64,
+            NativeModulus::new(),
+            SecretKeyDistr::UniformBinary,
+            0.7,
+        );
+        bench_phases(
+            &mut c.benchmark_group(format!("lwe/u64/native/n{dimension}")),
+            &params,
+        );
+        let params = LweParameters::new(
+            dimension,
+            4u64,
+            BarrettModulus::new(1_125_899_906_826_241),
+            SecretKeyDistr::UniformBinary,
+            0.7,
+        );
+        bench_phases(
+            &mut c.benchmark_group(format!("lwe/u64/explicit/n{dimension}")),
+            &params,
+        );
     }
 }
 criterion_group!(benches, secret_key);

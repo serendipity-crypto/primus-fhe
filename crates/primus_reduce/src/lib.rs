@@ -8,8 +8,9 @@
 //!
 //! The two marker supertraits [`RingContext`] and [`FieldContext`]
 //! aggregate the full ring / field operation sets respectively.
-//! [`RingContext`] also includes bounded signed encoding via [`EncodeSigned`],
-//! implemented by each concrete modulus type.
+//! [`RingContext`] also includes bounded signed encoding via [`EncodeSigned`]
+//! and mixed signed dot products via [`ReduceDotProductSigned`]. Each modulus
+//! backend implements these operations independently.
 //! These names describe supported operation sets rather than proving algebraic
 //! properties: in particular, [`FieldContext`] does not guarantee that the
 //! modulus is prime or that every nonzero residue is invertible.
@@ -40,7 +41,7 @@ pub use error::ReduceError;
 pub use lazy_ops::*;
 pub use lazy_slice_ops::*;
 pub use ops::*;
-pub use signed::EncodeSigned;
+pub use signed::{EncodeSigned, ReduceDotProductSigned};
 pub use slice_ops::*;
 
 use num_traits::ConstZero;

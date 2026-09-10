@@ -160,11 +160,25 @@ impl_simd_integer! {i8 i16 i32 i64 isize u8 u16 u32 u64 usize}
 pub trait SimdUnsignedInteger:
     UnsignedInteger + SimdInteger<SimdT: SimdUnsignedArray<Self>>
 {
+    /// Reinterprets the matching signed vector as unsigned lanes, preserving
+    /// every lane's width, bit pattern and position. The companion vectors
+    /// must have the same lane count. This does not encode an explicit modulus.
+    #[must_use]
+    fn simd_cast_from_signed(input: <Self::SignedInteger as SimdInteger>::SimdT) -> Self::SimdT
+    where
+        Self::SignedInteger: SimdInteger;
 }
 
 macro_rules! impl_simd_unsigned_integer {
     ($($t:ty)*) => ($(
-        impl SimdUnsignedInteger for $t {}
+        impl SimdUnsignedInteger for $t {
+            #[inline]
+            fn simd_cast_from_signed(
+                input: <Self::SignedInteger as SimdInteger>::SimdT,
+            ) -> Self::SimdT {
+                core::simd::num::SimdInt::cast(input)
+            }
+        }
     )*)
 }
 

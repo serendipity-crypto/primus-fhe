@@ -62,9 +62,13 @@ assert_eq!(values, [13, 13]);
 它不要求模数实现 `Reduce` 或 `ReduceNeg`。自定义模数类型需实现 `encode_signed`；
 默认切片方法统一检查一次等长，再静态调用对应的标量实现。
 
-`RingContext<T>` 包含 `EncodeSigned<T>`，`FieldContext<T>` 通过 `RingContext<T>` 继承此能力。
-使用任一 context 的泛型代码均可直接调用编码方法，无需额外的 trait 约束或导入。
-两个 context 均要求 `T: FheUint`；只需要有符号转换时，仍可单独使用 `EncodeSigned<T>`。
+`ReduceDotProductSigned<T>` 计算规范剩余类与有界 signed 系数的点积，返回规范剩余类，
+不分配 Encoded 副本。它检查两个切片等长，空输入返回零；signed 输入范围与
+`EncodeSigned` 相同。Native、PowOf2、Barrett 及派生 Barrett 模数分别实现此 trait，
+包括各后端的 SIMD 调度。
+
+`RingContext<T>` 包含这两个 signed 运算 trait，`FieldContext<T>` 通过 `RingContext<T>`
+继承它们。两个 context 均要求 `T: FheUint`；只需要某个运算时可单独约束对应 trait。
 
 ```rust
 use primus_modulus::{NativeModulus, UintModulus};

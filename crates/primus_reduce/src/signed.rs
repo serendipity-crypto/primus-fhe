@@ -40,3 +40,25 @@ pub trait EncodeSigned<T: FheUint>: Modulus<ValueT = T> {
         }
     }
 }
+
+/// Modular dot product of canonical residues and bounded signed coefficients.
+///
+/// Implemented by each modulus backend independently of [`EncodeSigned`] and
+/// [`ReduceDotProduct`](crate::ReduceDotProduct), so encoding can be fused with
+/// scalar or SIMD multiplication without an intermediate encoded slice.
+pub trait ReduceDotProductSigned<T: FheUint> {
+    /// Returns the canonical residue of `sum(lhs[i] * rhs[i])`, without allocating.
+    /// Empty slices return zero.
+    ///
+    /// # Correctness
+    ///
+    /// Each `lhs[i]` must be a canonical residue. For an explicit modulus `q`,
+    /// each `rhs[i].unsigned_abs() < q` must hold, as for [`EncodeSigned`]. The
+    /// native modulus accepts every signed value, including the signed minimum.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slices have different lengths.
+    #[must_use]
+    fn reduce_dot_product_signed(self, lhs: &[T], rhs: &[T::SignedInteger]) -> T;
+}

@@ -61,6 +61,7 @@ The operation traits, input ranges, output ranges, and slice-length requirements
 - Low-level slice kernels may use `debug_assert*!` for shape diagnostics; release callers must uphold the documented length contracts.
 - `FieldContext` is a capability marker. It does not prove primality or guarantee that every nonzero value is invertible.
 - `EncodeSigned` converts coefficients with unsigned magnitude less than the explicit modulus; Native accepts every signed value. Native preserves the bit pattern, PowOf2 applies its mask, and Uint/Compact/Barrett share the explicit-modulus conversion. The default slice method checks equal lengths once and uses the concrete scalar implementation.
+- `ReduceDotProductSigned` fuses bounded signed encoding with dot products for Native, PowOf2, Barrett and derived Barrett. It checks equal lengths once and returns zero for empty slices. Barrett encodes before wide accumulation, preserving the 16-product bound; SIMD handles full chunks and a scalar tail.
 
 ## License
 

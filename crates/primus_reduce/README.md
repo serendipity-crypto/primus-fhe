@@ -64,10 +64,15 @@ root and `prelude`. It does not require `Reduce` or `ReduceNeg`. Custom modulus
 types implement `encode_signed`; the default slice method checks equal lengths
 once and statically calls that scalar implementation.
 
-`RingContext<T>` includes `EncodeSigned<T>`, and `FieldContext<T>` inherits it
-through `RingContext<T>`. Generic code using either context can call the encoding
-methods without another trait bound or import. Both contexts require
-`T: FheUint`; code needing only signed conversion can use `EncodeSigned<T>` alone.
+`ReduceDotProductSigned<T>` computes the dot product of canonical residues and
+bounded signed coefficients, returning a canonical residue without an encoded
+copy. It checks equal slice lengths; empty inputs return zero. Its signed input
+bounds match `EncodeSigned`. Native, PowOf2, Barrett and derived Barrett moduli
+implement this trait, including backend-specific SIMD dispatch.
+
+`RingContext<T>` includes both signed operation traits; `FieldContext<T>` inherits
+them through `RingContext<T>`. Both contexts require `T: FheUint`. Code needing
+only one operation can use its individual trait without the full context.
 
 ```rust
 use primus_modulus::{NativeModulus, UintModulus};

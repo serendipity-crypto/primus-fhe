@@ -122,7 +122,9 @@ Raw single-secret operations are available through `secret.as_view()`:
 modulus, uniform sampler, noise sampler and RNG; `decrypt_phase` returns
 `b - <a,s>` without decoding. Passing zero to raw encryption produces a randomized
 encryption of zero. `LweSecretKeyRef::Signed` borrows signed coefficients without
-allocating an encoded copy. For explicit `q` they must satisfy `-q < s_i < q`;
+allocating an encoded copy. Its dot product uses the modulus backend's
+`ReduceDotProductSigned` implementation, which fuses encoding and multiplication.
+For explicit `q` they must satisfy `-q < s_i < q`;
 all signed values are valid under the native modulus. Raw samplers must use the
 same modulus. These range and sampler contracts are caller preconditions.
 

@@ -13,7 +13,7 @@ mod slice;
 pub mod simd;
 
 #[cfg(feature = "simd")]
-pub use simd::{SimdBarrettModulus, simd_reduce_dot_product};
+pub use simd::{SimdBarrettModulus, simd_reduce_dot_product, simd_reduce_dot_product_signed};
 
 /// A Barrett reduction context for an explicit unsigned-integer modulus.
 ///

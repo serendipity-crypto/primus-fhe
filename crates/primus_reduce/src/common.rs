@@ -5,10 +5,11 @@ use super::{ExplicitModulus, Modulus};
 
 /// A marker trait indicating the modulus can perform ring operations
 /// (reduce, add, sub, double, neg, mul, mul-add, square, exp, dot-product)
-/// and bounded signed encoding via [`EncodeSigned`].
+/// and bounded signed encoding/dot products via [`EncodeSigned`] and
+/// [`ReduceDotProductSigned`].
 ///
 /// Granted automatically (blanket impl) when the type implements every
-/// listed `Reduce*` trait with `Output = T`, together with [`EncodeSigned`].
+/// listed operation trait, together with [`EncodeSigned`].
 pub trait RingContext<T: FheUint>:
     Modulus<ValueT = T>
     + EncodeSigned<T>
@@ -40,6 +41,7 @@ pub trait RingContext<T: FheUint>:
     + ReduceExp<T>
     + ReduceExpPowerOf2<T>
     + ReduceDotProduct<T>
+    + ReduceDotProductSigned<T>
 {
 }
 
@@ -74,6 +76,7 @@ impl<T: FheUint, M> RingContext<T> for M where
         + ReduceExp<T>
         + ReduceExpPowerOf2<T>
         + ReduceDotProduct<T>
+        + ReduceDotProductSigned<T>
 {
 }
 

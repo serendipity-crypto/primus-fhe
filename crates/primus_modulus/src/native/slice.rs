@@ -194,6 +194,21 @@ impl<T: FheUint> ReduceDotProduct<T> for NativeModulus<T> {
     }
 }
 
+impl<T: FheUint> ReduceDotProductSigned<T> for NativeModulus<T> {
+    #[inline(always)]
+    fn reduce_dot_product_signed(self, lhs: &[T], rhs: &[T::SignedInteger]) -> T {
+        assert_eq!(
+            lhs.len(),
+            rhs.len(),
+            "reduce_dot_product_signed: length mismatch"
+        );
+        self.reduce_dot_product_iter(
+            lhs.iter().copied(),
+            rhs.iter().copied().map(|s| self.encode_signed(s)),
+        )
+    }
+}
+
 impl<T: FheUint> LazyReduceMulSlice<T> for NativeModulus<T> {
     #[inline]
     fn lazy_reduce_mul_slice_assign(self, a: &mut [T], b: &[T]) {
