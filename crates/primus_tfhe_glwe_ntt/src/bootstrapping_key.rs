@@ -2,18 +2,14 @@
 
 use primus_data::{Data, DataMut};
 use primus_decompose::primitive::ApproxSignedBasis;
-use primus_glwe::{NttGadgetDomain, NttGadgetEncryptContext, NttGlweSecretKey};
+use primus_glwe::{GlevParameters, NttGadgetEncryptContext, NttGlweSecretKey};
 use primus_integer::FheUint;
 use primus_lattice::{
-    GadgetSize,
-    context::NttGlweExternalProductContext,
-    ggsw::{NttGgsw, NttGgswIter},
-    glwe::Glwe,
-    lwe::Lwe,
+    GadgetSize, context::NttGlweExternalProductContext, ggsw::NttGgswIter, glwe::Glwe, lwe::Lwe,
 };
 use primus_lwe::{LweParameters, LweSecretKey};
 use primus_ntt::NttTable;
-use primus_poly::{Polynomial, PolynomialOwned};
+use primus_poly::Polynomial;
 use primus_reduce::{FieldContext, RingContext};
 use primus_tfhe::backend_support::{direct_exponent, modulus_switch, windowed_modulus_switch};
 
@@ -68,11 +64,21 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
 
     /// Generates an NTT bootstrapping key encrypting every binary input LWE
     /// secret coefficient under `output_secret_key`.
+    ///
+    /// # Correctness
+    ///
+    /// The output secret key must use the supplied table's NTT representation.
+    ///
+    /// # Panics
+    ///
+    /// Panics on non-binary input key distributions, incompatible key/parameter
+    /// layouts, NTT length/modulus or gadget workspace, or key storage overflow.
     pub fn generate_ntt<LM, M, Table, R>(
         input_secret_key: &LweSecretKey<T>,
         input_parameters: &LweParameters<T, LM>,
         output_secret_key: &NttGlweSecretKey<T>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        parameters: &GlevParameters<T, M>,
+        ntt: &Table,
         rng: &mut R,
         context: &mut NttGadgetEncryptContext<T>,
     ) -> Self
@@ -82,34 +88,23 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         Table: NttTable<ValueT = T>,
         R: rand::Rng + rand::CryptoRng,
     {
-        let parameters = domain.parameters();
         assert!(input_secret_key.distr().is_binary());
         assert_eq!(input_secret_key.dimension(), input_parameters.dimension());
         assert!(input_parameters.secret_key_distr().is_binary());
-        assert_eq!(output_secret_key.glwe_size(), parameters.glwe_size());
-
         let input_dimension = input_secret_key.dimension();
         let ggsw_len = parameters.ggsw_len();
         let total_len = input_dimension
             .checked_mul(ggsw_len)
             .expect("NTT bootstrapping-key length overflow");
         let mut data = vec![T::ZERO; total_len];
-        let mut message = PolynomialOwned::zero(parameters.poly_length());
-
-        for (&secret, chunk) in input_secret_key
-            .as_ref()
-            .iter()
-            .zip(data.chunks_exact_mut(ggsw_len))
-        {
-            message.as_mut()[0] = secret;
-            output_secret_key.encrypt_ggsw_to(
-                &message,
-                &mut NttGgsw::new(chunk),
-                domain,
-                rng,
-                context,
-            );
-        }
+        output_secret_key.encrypt_ggsw_constant_batch_to(
+            input_secret_key.as_ref(),
+            &mut data,
+            parameters,
+            ntt,
+            rng,
+            context,
+        );
 
         Self {
             data,
@@ -117,7 +112,7 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
             input_modulus: input_parameters.cipher_modulus().explicit_value(),
             size: parameters.size(),
             cipher_modulus: parameters.cipher_modulus().value(),
-            basis: domain.basis().clone(),
+            basis: parameters.basis().clone(),
         }
     }
 
@@ -128,12 +123,26 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
     }
 
     /// Blind-rotates an explicit-modulus GLWE accumulator using this key.
+    ///
+    /// Uses this key's stored layout and decomposition basis.
+    ///
+    /// # Correctness
+    ///
+    /// The accumulator must contain canonical coefficients modulo `modulus`.
+    /// The table must use the NTT representation used to generate this key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if input/output/accumulator or workspace layouts, the modulus,
+    /// or the NTT length/modulus do not match the key. Compatibility checks
+    /// precede output writes.
     pub fn ntt_blind_rotate_to<M, Table, A, B, C>(
         &self,
         input: &Lwe<A>,
         accumulator: &Glwe<B>,
         output: &mut Glwe<C>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweBlindRotationContext<T>,
     ) where
         M: FieldContext<T>,
@@ -142,21 +151,26 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         B: Data<Elem = T>,
         C: DataMut<Elem = T>,
     {
-        let two_n = domain.parameters().poly_length() * 2;
-        let modulus = self.input_modulus();
-        self.blind_rotate_with(input, accumulator, output, domain, context, |x| {
-            modulus_switch(x, modulus, two_n)
+        let two_n = self.size.glwe_size().poly_length() * 2;
+        let input_modulus = self.input_modulus();
+        self.blind_rotate_with(input, accumulator, output, modulus, ntt, context, |x| {
+            modulus_switch(x, input_modulus, two_n)
         });
     }
 
     /// Blind-rotates an encoded lookup-table polynomial as a trivial GLWE
     /// accumulator.
+    ///
+    /// Inherits [`Self::ntt_blind_rotate_to`]'s modulus, transform and workspace
+    /// requirements. The lookup polynomial must have N canonical coefficients;
+    /// an incorrect length panics before output writes.
     pub fn ntt_blind_rotate_lookup_table_to<M, Table, A, B, C>(
         &self,
         input: &Lwe<A>,
         lookup_table: &Polynomial<B>,
         output: &mut Glwe<C>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweBlindRotationContext<T>,
     ) where
         M: FieldContext<T>,
@@ -165,16 +179,44 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         B: Data<Elem = T>,
         C: DataMut<Elem = T>,
     {
-        let parameters = domain.parameters();
-        let poly_length = parameters.poly_length();
+        self.assert_compatible(modulus, ntt, context);
+        self.ntt_blind_rotate_lookup_table_kernel_to(
+            input,
+            lookup_table,
+            output,
+            modulus,
+            ntt,
+            context,
+        );
+    }
+
+    /// Uses resources bound by evaluator construction or validated by the public
+    /// wrapper. Still checks the per-call input, lookup table and output layouts.
+    pub(crate) fn ntt_blind_rotate_lookup_table_kernel_to<M, Table, A, B, C>(
+        &self,
+        input: &Lwe<A>,
+        lookup_table: &Polynomial<B>,
+        output: &mut Glwe<C>,
+        modulus: M,
+        ntt: &Table,
+        context: &mut NttGlweBlindRotationContext<T>,
+    ) where
+        M: FieldContext<T>,
+        Table: NttTable<ValueT = T>,
+        A: Data<Elem = T>,
+        B: Data<Elem = T>,
+        C: DataMut<Elem = T>,
+    {
+        let poly_length = self.size.glwe_size().poly_length();
         let two_n = poly_length * 2;
-        debug_assert_eq!(
+        assert_eq!(
             (
                 input.dimension(),
                 lookup_table.as_ref().len(),
                 output.as_ref().len(),
             ),
-            (self.input_dimension(), poly_length, self.size().glwe_len(),)
+            (self.input_dimension(), poly_length, self.size().glwe_len()),
+            "blind-rotation input, lookup table or output layout mismatch"
         );
 
         let input_modulus = self.input_modulus();
@@ -182,12 +224,8 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         let initial_exponent = exponent_of(input.b()).wrapping_neg() & (two_n - 1);
         let (mask, body) = output.a_b_mut_slices(poly_length);
         mask.fill(T::ZERO);
-        lookup_table.mul_monomial_to(
-            initial_exponent,
-            &mut Polynomial(body),
-            parameters.cipher_modulus(),
-        );
-        self.blind_rotate_initialized(input, output, domain, context, exponent_of);
+        lookup_table.mul_monomial_to(initial_exponent, &mut Polynomial(body), modulus);
+        self.blind_rotate_initialized(input, output, modulus, ntt, context, exponent_of);
     }
 
     /// Blind-rotates an interleaved PBSManyLUT accumulator.
@@ -196,13 +234,21 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
     /// `output_count`, preserving the independently programmed residue
     /// classes. `output_count` must be a non-zero power of two dividing the
     /// polynomial length.
+    ///
+    /// Inherits [`Self::ntt_blind_rotate_lookup_table_to`]'s requirements.
+    /// An invalid output count panics before output writes.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keep modulus, transform and workspace roles explicit"
+    )]
     pub fn ntt_blind_rotate_many_lookup_table_to<M, Table, A, B, C>(
         &self,
         input: &Lwe<A>,
         lookup_table: &Polynomial<B>,
         output_count: usize,
         output: &mut Glwe<C>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweBlindRotationContext<T>,
     ) where
         M: FieldContext<T>,
@@ -211,8 +257,41 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         B: Data<Elem = T>,
         C: DataMut<Elem = T>,
     {
-        let parameters = domain.parameters();
-        let poly_length = parameters.poly_length();
+        self.assert_compatible(modulus, ntt, context);
+        self.ntt_blind_rotate_many_lookup_table_kernel_to(
+            input,
+            lookup_table,
+            output_count,
+            output,
+            modulus,
+            ntt,
+            context,
+        );
+    }
+
+    /// Uses resources bound by evaluator construction or validated by the public
+    /// wrapper. Still checks the per-call input, lookup table and output layouts.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keep modulus, transform and workspace roles explicit"
+    )]
+    pub(crate) fn ntt_blind_rotate_many_lookup_table_kernel_to<M, Table, A, B, C>(
+        &self,
+        input: &Lwe<A>,
+        lookup_table: &Polynomial<B>,
+        output_count: usize,
+        output: &mut Glwe<C>,
+        modulus: M,
+        ntt: &Table,
+        context: &mut NttGlweBlindRotationContext<T>,
+    ) where
+        M: FieldContext<T>,
+        Table: NttTable<ValueT = T>,
+        A: Data<Elem = T>,
+        B: Data<Elem = T>,
+        C: DataMut<Elem = T>,
+    {
+        let poly_length = self.size.glwe_size().poly_length();
         let two_n = poly_length * 2;
         assert!(
             output_count.is_power_of_two() && poly_length.is_multiple_of(output_count),
@@ -234,21 +313,25 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         let initial_exponent = exponent_of(input.b()).wrapping_neg() & (two_n - 1);
         let (mask, body) = output.a_b_mut_slices(poly_length);
         mask.fill(T::ZERO);
-        lookup_table.mul_monomial_to(
-            initial_exponent,
-            &mut Polynomial(body),
-            parameters.cipher_modulus(),
-        );
-        self.blind_rotate_initialized(input, output, domain, context, exponent_of);
+        lookup_table.mul_monomial_to(initial_exponent, &mut Polynomial(body), modulus);
+        self.blind_rotate_initialized(input, output, modulus, ntt, context, exponent_of);
     }
 
     /// Blind-rotates from an LWE whose coefficients are exponents in `[0, 2N)`.
+    ///
+    /// Inherits [`Self::ntt_blind_rotate_to`]'s compatibility requirements.
+    ///
+    /// # Correctness
+    ///
+    /// Every input coefficient must lie in `[0, 2N)`; this range is not
+    /// checked in release builds.
     pub fn ntt_blind_rotate_exponents_to<M, Table, A, B, C>(
         &self,
         input: &Lwe<A>,
         accumulator: &Glwe<B>,
         output: &mut Glwe<C>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweBlindRotationContext<T>,
     ) where
         M: FieldContext<T>,
@@ -257,18 +340,24 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         B: Data<Elem = T>,
         C: DataMut<Elem = T>,
     {
-        let two_n = 2 * domain.parameters().poly_length();
-        self.blind_rotate_with(input, accumulator, output, domain, context, |x| {
+        let two_n = 2 * self.size.glwe_size().poly_length();
+        self.blind_rotate_with(input, accumulator, output, modulus, ntt, context, |x| {
             direct_exponent(x, two_n)
         });
     }
 
+    /// Validates resources and rotates the initial accumulator before the CMUX loop.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keep modulus, transform and workspace roles explicit"
+    )]
     fn blind_rotate_with<M, Table, A, B, C, F>(
         &self,
         input: &Lwe<A>,
         accumulator: &Glwe<B>,
         output: &mut Glwe<C>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweBlindRotationContext<T>,
         exponent_of: F,
     ) where
@@ -279,11 +368,9 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         C: DataMut<Elem = T>,
         F: Fn(T) -> usize,
     {
-        let parameters = domain.parameters();
-        let modulus = parameters.cipher_modulus();
-        let poly_length = parameters.poly_length();
+        let poly_length = self.size.glwe_size().poly_length();
         let two_n = 2 * poly_length;
-        debug_assert_eq!(
+        assert_eq!(
             (
                 input.dimension(),
                 accumulator.as_ref().len(),
@@ -293,19 +380,60 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
                 self.input_dimension(),
                 self.size().glwe_len(),
                 self.size().glwe_len(),
-            )
+            ),
+            "blind-rotation input, accumulator or output layout mismatch"
         );
 
+        self.assert_compatible(modulus, ntt, context);
         let initial_exponent = exponent_of(input.b()).wrapping_neg() & (two_n - 1);
         accumulator.mul_monomial_to(initial_exponent, output, poly_length, modulus);
-        self.blind_rotate_initialized(input, output, domain, context, exponent_of);
+        self.blind_rotate_initialized(input, output, modulus, ntt, context, exponent_of);
     }
 
+    /// Checks evaluation resources before initializing the output accumulator.
+    fn assert_compatible<M, Table>(
+        &self,
+        modulus: M,
+        ntt: &Table,
+        context: &NttGlweBlindRotationContext<T>,
+    ) where
+        M: FieldContext<T>,
+        Table: NttTable<ValueT = T>,
+    {
+        assert_eq!(
+            ntt.poly_length(),
+            self.size.glwe_size().poly_length(),
+            "blind-rotation NTT polynomial length mismatch"
+        );
+        assert_eq!(
+            modulus.value(),
+            self.cipher_modulus,
+            "blind-rotation ciphertext modulus mismatch"
+        );
+        assert_eq!(
+            ntt.modulus(),
+            modulus.value(),
+            "NTT ciphertext modulus mismatch"
+        );
+        assert_eq!(
+            context.external_product.size(),
+            self.size,
+            "blind-rotation workspace gadget layout mismatch"
+        );
+        debug_assert_eq!(
+            context.scratch.as_ref().len(),
+            self.size.glwe_len(),
+            "blind-rotation workspace GLWE layout mismatch"
+        );
+    }
+
+    /// Rotates an initialized accumulator after layouts and resources have been checked.
     fn blind_rotate_initialized<M, Table, A, C, F>(
         &self,
         input: &Lwe<A>,
         output: &mut Glwe<C>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweBlindRotationContext<T>,
         exponent_of: F,
     ) where
@@ -315,26 +443,6 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
         C: DataMut<Elem = T>,
         F: Fn(T) -> usize,
     {
-        let parameters = domain.parameters();
-        assert_eq!(domain.size(), self.size, "blind-rotation domain mismatch");
-        assert_eq!(
-            domain.basis(),
-            &self.basis,
-            "blind-rotation decomposition basis mismatch"
-        );
-        assert_eq!(
-            context.external_product.size(),
-            self.size,
-            "blind-rotation workspace gadget layout mismatch"
-        );
-        assert_eq!(
-            context.scratch.as_ref().len(),
-            self.size.glwe_len(),
-            "blind-rotation workspace GLWE layout mismatch"
-        );
-        let ntt = domain.table();
-        let modulus = parameters.cipher_modulus();
-
         let NttGlweBlindRotationContext {
             scratch,
             external_product,
@@ -350,7 +458,7 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
                     output,
                     exponent,
                     scratch,
-                    parameters.basis(),
+                    &self.basis,
                     modulus,
                     ntt,
                     external_product,
@@ -360,7 +468,7 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
                     scratch,
                     exponent,
                     output,
-                    parameters.basis(),
+                    &self.basis,
                     modulus,
                     ntt,
                     external_product,
@@ -376,6 +484,7 @@ impl<T: FheUint> NttGlweBootstrappingKey<T> {
 
 /// Reusable workspace for NTT blind rotation.
 pub struct NttGlweBlindRotationContext<T: FheUint> {
+    // new/resize/rebind keep scratch consistent with external_product.size().
     scratch: Glwe<Vec<T>>,
     external_product: NttGlweExternalProductContext<T>,
 }

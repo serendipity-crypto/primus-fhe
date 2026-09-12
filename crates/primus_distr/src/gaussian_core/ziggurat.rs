@@ -213,7 +213,9 @@ impl<T: FheInt> ZigguratMagnitudeSampler<T> {
         self.standard_deviation
     }
 
-    #[inline]
+    // Sharing magnitude tables between output encodings must not introduce a
+    // call per coefficient; sample_secret_key regresses when LLVM outlines it.
+    #[inline(always)]
     pub(crate) fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> (bool, T) {
         loop {
             let rectangle = self.sample_rectangle.sample(rng);

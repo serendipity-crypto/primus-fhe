@@ -1,36 +1,14 @@
 //! Single-modulus coefficient-domain GLWE secret key.
 
+use primus_distr::SecretKeySampler;
 use primus_integer::FheUint;
 use primus_lattice::GlweSize;
-use primus_reduce::RingContext;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{GlweParameters, SecretKeyDistr};
+use crate::SecretKeyDistr;
 
-/// Common secret-key shape exposed by single-modulus and RNS GLWE parameters.
-pub trait GlweSecretKeyParameterSet<T: FheUint> {
-    /// Returns the GLWE secret-key layout.
-    fn secret_key_size(&self) -> GlweSize;
-
-    /// Returns the coefficient distribution.
-    fn secret_key_distr(&self) -> SecretKeyDistr;
-}
-
-impl<T, M> GlweSecretKeyParameterSet<T> for GlweParameters<T, M>
-where
-    T: FheUint,
-    M: RingContext<T>,
-{
-    fn secret_key_size(&self) -> GlweSize {
-        self.size()
-    }
-
-    fn secret_key_distr(&self) -> SecretKeyDistr {
-        self.secret_key_distr()
-    }
-}
-
-/// Represents a secret key for the Module Learning with Errors (MLWE) cryptographic scheme.
+/// A GLWE secret key stored as signed coefficient polynomials.
+/// Signed coefficients are securely erased when the key is dropped.
 #[derive(Clone)]
 pub struct GlweSecretKey<T: FheUint> {
     pub(crate) key: Vec<T::SignedInteger>,
@@ -47,11 +25,28 @@ impl<T: FheUint> Zeroize for GlweSecretKey<T> {
 
 impl<T: FheUint> ZeroizeOnDrop for GlweSecretKey<T> {}
 
+impl<T: FheUint> Drop for GlweSecretKey<T> {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 impl<T: FheUint> GlweSecretKey<T> {
-    /// Creates a new [`GlweSecretKey<T>`].
+    /// Wraps signed coefficient storage with its layout and distribution metadata.
+    /// The distribution is recorded without checking the supplied coefficients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `key.len()` differs from `glwe_size.mask_len()`.
     #[inline]
+    #[must_use]
     pub fn new(key: Vec<T::SignedInteger>, glwe_size: GlweSize, distr: SecretKeyDistr) -> Self {
-        assert_eq!(key.len(), glwe_size.mask_len());
+        assert_eq!(
+            key.len(),
+            glwe_size.mask_len(),
+            "coefficient secret key layout mismatch"
+        );
+
         Self {
             key,
             glwe_size,
@@ -61,62 +56,60 @@ impl<T: FheUint> GlweSecretKey<T> {
 
     /// Returns the GLWE layout of this [`GlweSecretKey<T>`].
     #[inline]
+    #[must_use]
     pub fn glwe_size(&self) -> GlweSize {
         self.glwe_size
     }
 
-    /// Returns the poly length of this [`GlweSecretKey<T>`].
+    /// Returns the coefficient polynomial length.
     #[inline]
+    #[must_use]
     pub fn poly_length(&self) -> usize {
         self.glwe_size.poly_length()
     }
 
-    /// Returns the dimension of this [`GlweSecretKey<T>`].
+    /// Returns the GLWE dimension.
     #[inline]
+    #[must_use]
     pub fn dimension(&self) -> usize {
         self.glwe_size.dimension()
     }
 
-    /// Returns the distr of this [`GlweSecretKey<T>`].
+    /// Returns the secret-key distribution.
     #[inline]
+    #[must_use]
     pub fn distr(&self) -> SecretKeyDistr {
         self.distr
     }
 
     /// Returns all coefficient-domain secret-key values.
     #[inline]
+    #[must_use]
     pub fn as_slice(&self) -> &[T::SignedInteger] {
         &self.key
     }
 
     /// Iterates over the coefficient-domain secret polynomials.
     #[inline]
+    #[must_use]
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &[T::SignedInteger]> + DoubleEndedIterator {
         self.key.chunks_exact(self.glwe_size.poly_length())
     }
 
-    #[inline]
-    /// Samples a canonical coefficient-domain key from `params`.
-    pub fn generate<R, P>(params: &P, rng: &mut R) -> Self
-    where
-        R: rand::Rng + rand::CryptoRng,
-        P: GlweSecretKeyParameterSet<T>,
-    {
-        Self::generate_with_distribution(params.secret_key_size(), params.secret_key_distr(), rng)
-    }
-
-    /// Generates a canonical signed GLWE secret key from its shape and
-    /// coefficient distribution.
-    pub fn generate_with_distribution<R>(
-        glwe_size: GlweSize,
-        distr: SecretKeyDistr,
-        rng: &mut R,
-    ) -> Self
+    /// Generates a canonical signed GLWE secret key using borrowed precomputation.
+    /// Fixed weights apply to the complete coefficient key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a fixed weight exceeds `glwe_size.mask_len()` or its sum overflows.
+    #[must_use]
+    pub fn generate<R>(glwe_size: GlweSize, sampler: &SecretKeySampler<T>, rng: &mut R) -> Self
     where
         R: rand::Rng + rand::CryptoRng,
     {
         let key_len = glwe_size.mask_len();
-        let key = primus_distr::SignedSecretKeySampler::new(distr).sample(key_len, rng);
+        let key = sampler.sample_signed(key_len, rng);
+        let distr = sampler.distr();
 
         Self {
             key,

@@ -1,3 +1,4 @@
+use rand::{SeedableRng, rngs::StdRng};
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -22,7 +23,7 @@ fn bench_automorphism(c: &mut Criterion) {
     let moduli = moduli_values.map(BarrettModulus::new);
     let auto_degree = 5;
 
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
 
     let mut group = c.benchmark_group("automorphism");
 
@@ -44,7 +45,11 @@ fn bench_automorphism(c: &mut Criterion) {
         let rns_glwe_len = glwe_params.rns_glwe_len();
         let base_q = glwe_params.base_q();
 
-        let sk = GlweSecretKey::generate(&glwe_params, &mut rng);
+        let sk = GlweSecretKey::generate(
+            glwe_params.size().glwe_size(),
+            glwe_params.secret_key_sampler(),
+            &mut rng,
+        );
         let dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&sk, &table);
 
         let glev_params = CrtGlevParameters::with_glwe_params(&glwe_params, 20, None);
@@ -77,7 +82,7 @@ fn bench_automorphism(c: &mut Criterion) {
 
         let n_label = format!("N={poly_length}");
 
-        group.bench_with_input(BenchmarkId::new("CRT", &n_label), &(), |b, _| {
+        group.bench_function(BenchmarkId::new("CRT", &n_label), |b| {
             b.iter(|| {
                 crt_auto_key.automorphism_to(
                     black_box(&c_coeff),
@@ -88,7 +93,7 @@ fn bench_automorphism(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("DCRT", &n_label), &(), |b, _| {
+        group.bench_function(BenchmarkId::new("DCRT", &n_label), |b| {
             b.iter(|| {
                 dcrt_auto_key.automorphism_to(
                     black_box(&c_ntt),

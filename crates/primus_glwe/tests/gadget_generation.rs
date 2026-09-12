@@ -1,8 +1,8 @@
 use primus_fft::{FftEngine, FftTable, RustFftTable};
 use primus_glwe::{
     FourierGadgetEncryptContext, FourierGlweDecryptContext, FourierGlweEncryptContext,
-    FourierGlweSecretKey, GadgetSize, GlevParameters, GlweParameters, GlweSecretKey, GlweSize,
-    NttGadgetDomain, NttGadgetEncryptContext, NttGlweSecretKey, SecretKeyDistr,
+    FourierGlweSecretKey, GlevParameters, GlweParameters, GlweSecretKey, NttGadgetEncryptContext,
+    NttGlweSecretKey, SecretKeyDistr,
 };
 use primus_lattice::{
     context::{FourierGlweExternalProductContext, NttGlweExternalProductContext},
@@ -13,24 +13,32 @@ use primus_lattice::{
 use primus_modulus::{BarrettModulus, NativeModulus};
 use primus_ntt::{NttTable, UintNttTable};
 use primus_poly::{Polynomial, PolynomialOwned};
-use primus_reduce::{ReduceMul, ReduceNeg};
+use rand::{SeedableRng, rngs::StdRng};
 
 const DIMENSION: usize = 2;
 const POLY_LENGTH: usize = 256;
 
-#[test]
-fn single_modulus_common_sizes_match_layout() {
-    let glwe = GlweSize::new(DIMENSION, POLY_LENGTH);
-    assert_eq!(glwe.dimension(), DIMENSION);
-    assert_eq!(glwe.poly_length(), POLY_LENGTH);
-    assert_eq!(glwe.mask_len(), DIMENSION * POLY_LENGTH);
-    assert_eq!(glwe.glwe_len(), (DIMENSION + 1) * POLY_LENGTH);
-
-    let glev = GadgetSize::new(glwe, 4);
-    assert_eq!(glev.glwe_size(), glwe);
-    assert_eq!(glev.decompose_length(), 4);
-    assert_eq!(glev.glev_len(), 4 * glwe.glwe_len());
-    assert_eq!(glev.ggsw_len(), (DIMENSION + 1) * glev.glev_len());
+// Independent integer oracle for g_l * m (body row) or -g_l * m * s_r
+// (mask row) in Z_q[X]/(X^N + 1). Test sizes and coefficients fit in i128.
+fn expected_ggsw_phase(message: &[u32], secret: Option<&[i32]>, scalar: u32, q: u64) -> Vec<u32> {
+    let mut phase: Vec<i128> = message.iter().map(|&value| i128::from(value)).collect();
+    if let Some(secret) = secret {
+        phase.fill(0);
+        for (i, &m) in message.iter().enumerate() {
+            for (j, &s) in secret.iter().enumerate() {
+                let product = i128::from(m) * i128::from(s);
+                if i + j < message.len() {
+                    phase[i + j] -= product;
+                } else {
+                    phase[i + j - message.len()] += product;
+                }
+            }
+        }
+    }
+    phase
+        .into_iter()
+        .map(|value| (value * i128::from(scalar)).rem_euclid(i128::from(q)) as u32)
+        .collect()
 }
 
 fn native_distance(lhs: u32, rhs: u32) -> u32 {
@@ -43,10 +51,10 @@ fn explicit_distance(lhs: u32, rhs: u32, modulus: u32) -> u32 {
 }
 
 #[test]
-fn fourier_glev_generation_and_ggsw_external_product() {
+fn fourier_gadget_phases_and_external_product() {
     let table = RustFftTable::new(POLY_LENGTH.trailing_zeros()).unwrap();
     let mut fft = FftEngine::new(&table);
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     let glwe_params = GlweParameters::new(
         DIMENSION,
         POLY_LENGTH,
@@ -56,7 +64,12 @@ fn fourier_glev_generation_and_ggsw_external_product() {
         0.7,
     );
     let params = GlevParameters::with_glwe_params(&glwe_params, 8, None);
-    let secret_key = FourierGlweSecretKey::generate(&glwe_params, &mut fft, &mut rng);
+    let coeff_secret_key = GlweSecretKey::generate(
+        glwe_params.size(),
+        glwe_params.secret_key_sampler(),
+        &mut rng,
+    );
+    let secret_key = FourierGlweSecretKey::from_coeff_secret_key(&coeff_secret_key, &mut fft);
     let mut gadget_context = FourierGadgetEncryptContext::new(params.size());
     let mut decrypt_context = FourierGlweDecryptContext::new(POLY_LENGTH);
 
@@ -89,14 +102,42 @@ fn fourier_glev_generation_and_ggsw_external_product() {
     }
 
     let mut ggsw = FourierGgswOwned::zero(params.fourier_ggsw_len());
+    let ring_message = Polynomial::new(
+        (0..POLY_LENGTH)
+            .map(|i| (i as u32).wrapping_mul(0x9e37_79b9))
+            .collect::<Vec<_>>(),
+    );
     secret_key.encrypt_ggsw_to(
-        &raw_message,
+        &ring_message,
         &mut ggsw,
         &params,
         &mut fft,
         &mut rng,
         &mut gadget_context,
     );
+    for (row, glev) in ggsw.iter_glev(params.fourier_glev_len()).enumerate() {
+        for (scalar, glwe) in params
+            .basis()
+            .scalar_iter()
+            .zip(glev.iter_glwe(params.fourier_glwe_len()))
+        {
+            let mut phase = PolynomialOwned::zero(POLY_LENGTH);
+            secret_key.phase_to(&glwe, &mut phase, &mut fft, &mut decrypt_context);
+            let expected = expected_ggsw_phase(
+                ring_message.as_ref(),
+                coeff_secret_key.iter().nth(row),
+                scalar,
+                1u64 << 32,
+            );
+            assert!(
+                phase
+                    .iter()
+                    .zip(expected)
+                    .all(|(&actual, expected)| native_distance(actual, expected) <= 8),
+                "GGSW row {row}, scalar {scalar}"
+            );
+        }
+    }
 
     let plaintext_values: Vec<u32> = (0..POLY_LENGTH).map(|index| (index % 16) as u32).collect();
     let plaintext = Polynomial::new(plaintext_values.clone());
@@ -154,12 +195,12 @@ fn fourier_glev_generation_and_ggsw_external_product() {
 }
 
 #[test]
-fn ntt_glev_and_ggsw_generation() {
+fn ntt_gadget_phases_and_external_product() {
     const MODULUS: u32 = 132_120_577;
 
     let modulus = BarrettModulus::new(MODULUS);
     let ntt = UintNttTable::new(POLY_LENGTH.trailing_zeros(), modulus).unwrap();
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     let glwe_params = GlweParameters::new(
         DIMENSION,
         POLY_LENGTH,
@@ -169,16 +210,26 @@ fn ntt_glev_and_ggsw_generation() {
         0.7,
     );
     let params = GlevParameters::with_glwe_params(&glwe_params, 8, None);
-    let domain = NttGadgetDomain::try_new(&params, &ntt).unwrap();
-    let coeff_secret_key = GlweSecretKey::generate(&glwe_params, &mut rng);
+    let coeff_secret_key = GlweSecretKey::generate(
+        glwe_params.size(),
+        glwe_params.secret_key_sampler(),
+        &mut rng,
+    );
     let secret_key = NttGlweSecretKey::from_coeff_secret_key(&coeff_secret_key, &ntt);
-    let mut context = NttGadgetEncryptContext::new(domain.size());
+    let mut context = NttGadgetEncryptContext::new(params.size());
 
     let mut raw_message = vec![0u32; POLY_LENGTH];
     raw_message[0] = 1;
     let raw_message = Polynomial::new(raw_message);
     let mut glev: NttGlev<Vec<u32>> = NttGlev::zero(params.glev_len());
-    secret_key.encrypt_glev_to(&raw_message, &mut glev, &domain, &mut rng, &mut context);
+    secret_key.encrypt_glev_to(
+        &raw_message,
+        &mut glev,
+        &params,
+        &ntt,
+        &mut rng,
+        &mut context,
+    );
 
     for (scalar, glwe) in params
         .basis()
@@ -186,7 +237,7 @@ fn ntt_glev_and_ggsw_generation() {
         .zip(glev.iter_ntt_glwe(params.glwe_len()))
     {
         let mut phase = PolynomialOwned::zero(POLY_LENGTH);
-        secret_key.phase_to(&glwe, &mut phase, &ntt, modulus);
+        secret_key.phase_to(&glwe, &mut phase, modulus, &ntt);
         assert!(explicit_distance(phase.as_ref()[0], scalar, MODULUS) <= 8);
         assert!(
             phase.as_ref()[1..]
@@ -196,7 +247,19 @@ fn ntt_glev_and_ggsw_generation() {
     }
 
     let mut ggsw: NttGgsw<Vec<u32>> = NttGgsw::zero(params.ggsw_len());
-    secret_key.encrypt_ggsw_to(&raw_message, &mut ggsw, &domain, &mut rng, &mut context);
+    let ring_message = Polynomial::new(
+        (0..POLY_LENGTH)
+            .map(|i| (i as u32).wrapping_mul(0x9e37_79b9) % MODULUS)
+            .collect::<Vec<_>>(),
+    );
+    secret_key.encrypt_ggsw_to(
+        &ring_message,
+        &mut ggsw,
+        &params,
+        &ntt,
+        &mut rng,
+        &mut context,
+    );
 
     for (row, glev) in ggsw.iter_ntt_glev(params.glev_len()).enumerate() {
         for (scalar, glwe) in params
@@ -205,33 +268,20 @@ fn ntt_glev_and_ggsw_generation() {
             .zip(glev.iter_ntt_glwe(params.glwe_len()))
         {
             let mut phase = PolynomialOwned::zero(POLY_LENGTH);
-            secret_key.phase_to(&glwe, &mut phase, &ntt, modulus);
-            let expected: Vec<u32> = if row == DIMENSION {
-                let mut values = vec![0; POLY_LENGTH];
-                values[0] = scalar;
-                values
-            } else {
-                coeff_secret_key
-                    .iter()
-                    .nth(row)
-                    .unwrap()
-                    .iter()
-                    .map(|&coefficient| {
-                        let coefficient = if coefficient < 0 {
-                            modulus.reduce_neg(coefficient.unsigned_abs())
-                        } else {
-                            coefficient as u32
-                        };
-                        modulus.reduce_neg(modulus.reduce_mul(coefficient, scalar))
-                    })
-                    .collect()
-            };
+            secret_key.phase_to(&glwe, &mut phase, modulus, &ntt);
+            let expected = expected_ggsw_phase(
+                ring_message.as_ref(),
+                coeff_secret_key.iter().nth(row),
+                scalar,
+                u64::from(MODULUS),
+            );
             assert!(
                 phase
                     .as_ref()
                     .iter()
                     .zip(expected)
-                    .all(|(&actual, expected)| explicit_distance(actual, expected, MODULUS) <= 8)
+                    .all(|(&actual, expected)| explicit_distance(actual, expected, MODULUS) <= 8),
+                "GGSW row {row}, scalar {scalar}"
             );
         }
     }
@@ -244,7 +294,8 @@ fn ntt_glev_and_ggsw_generation() {
     secret_key.encrypt_ggsw_to(
         &Polynomial::new(monomial_message),
         &mut ggsw,
-        &domain,
+        &params,
+        &ntt,
         &mut rng,
         &mut context,
     );
@@ -253,7 +304,7 @@ fn ntt_glev_and_ggsw_generation() {
     secret_key.encrypt_to(&plaintext, &mut input_ntt, &glwe_params, &ntt, &mut rng);
     let input = input_ntt.into_coeff_form(&ntt);
     let mut output: Glwe<Vec<u32>> = Glwe::zero(params.glwe_len());
-    let mut external_product_context = NttGlweExternalProductContext::new(domain.size());
+    let mut external_product_context = NttGlweExternalProductContext::new(params.size());
     ggsw.external_product_to(
         &input,
         &mut output,
@@ -270,4 +321,73 @@ fn ntt_glev_and_ggsw_generation() {
         secret_key.decrypt(&output_ntt, &glwe_params, &ntt).as_ref(),
         expected
     );
+}
+
+#[test]
+fn ntt_constant_ggsw_batch_matches_individual_encryptions() {
+    use rand::Rng;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let n = 16usize;
+    let modulus = BarrettModulus::new(257u32);
+    let glwe = GlweParameters::new(2, n, 16, modulus, SecretKeyDistr::UniformBinary, 0.7);
+    let params = GlevParameters::with_glwe_params(&glwe, 4, None);
+    let table = UintNttTable::new(n.trailing_zeros(), modulus).unwrap();
+    let mut rng = StdRng::seed_from_u64(42);
+    let key = NttGlweSecretKey::generate(&glwe, &table, &mut rng);
+    let mut context = NttGadgetEncryptContext::new(params.size());
+    let mut single_context = NttGadgetEncryptContext::new(params.size());
+    // Include empty input, binary BSK inputs and general canonical constants.
+    for constants in [&[][..], &[0, 1, 256, 17][..]] {
+        let mut batch = vec![7; constants.len() * params.ggsw_len()];
+        let mut singles = batch.clone();
+        let mut rng = StdRng::seed_from_u64(43);
+        let mut single_rng = StdRng::seed_from_u64(43);
+        key.encrypt_ggsw_constant_batch_to(
+            constants,
+            &mut batch,
+            &params,
+            &table,
+            &mut rng,
+            &mut context,
+        );
+        let mut message = PolynomialOwned::zero(n);
+        for (&constant, chunk) in constants
+            .iter()
+            .zip(singles.chunks_exact_mut(params.ggsw_len()))
+        {
+            message.as_mut()[0] = constant;
+            key.encrypt_ggsw_to(
+                &message,
+                &mut NttGgsw::new(chunk),
+                &params,
+                &table,
+                &mut single_rng,
+                &mut single_context,
+            );
+        }
+        assert_eq!(batch, singles);
+        assert_eq!(rng.next_u64(), single_rng.next_u64());
+    }
+    // An invalid total length must fail before writing or consuming randomness.
+    for len in [params.ggsw_len(), 2 * params.ggsw_len() + 1] {
+        let mut output = vec![7; len];
+        let mut rng = StdRng::seed_from_u64(43);
+        let mut expected_rng = StdRng::seed_from_u64(43);
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                key.encrypt_ggsw_constant_batch_to(
+                    &[0, 1],
+                    &mut output,
+                    &params,
+                    &table,
+                    &mut rng,
+                    &mut context,
+                );
+            }))
+            .is_err()
+        );
+        assert_eq!(output, vec![7; len]);
+        assert_eq!(rng.next_u64(), expected_rng.next_u64());
+    }
 }

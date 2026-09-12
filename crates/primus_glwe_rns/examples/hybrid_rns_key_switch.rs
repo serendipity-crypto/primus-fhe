@@ -38,8 +38,16 @@ fn main() {
     let domain = HybridRnsKeySwitchDomain::try_new(&hybrid_rns, &qp_table).unwrap();
 
     let mut rng = StdRng::seed_from_u64(0x4859_4252_4944_524e);
-    let input_key = GlweSecretKey::generate(&glwe_parameters, &mut rng);
-    let output_key = GlweSecretKey::generate(&glwe_parameters, &mut rng);
+    let input_key = GlweSecretKey::generate(
+        glwe_parameters.size().glwe_size(),
+        glwe_parameters.secret_key_sampler(),
+        &mut rng,
+    );
+    let output_key = GlweSecretKey::generate(
+        glwe_parameters.size().glwe_size(),
+        glwe_parameters.secret_key_sampler(),
+        &mut rng,
+    );
     let input_dcrt_key = DcrtGlweSecretKey::from_coeff_secret_key(&input_key, &q_table);
     let output_dcrt_key = DcrtGlweSecretKey::from_coeff_secret_key(&output_key, &q_table);
     let switching_key = HybridRnsGlweKeySwitchingKey::generate(

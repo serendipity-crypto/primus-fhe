@@ -1,7 +1,7 @@
 //! Single-modulus GLWE / GLev / GGSW parameters.
 
 use primus_decompose::primitive::ApproxSignedBasis;
-use primus_distr::DiscreteGaussian;
+use primus_distr::{DiscreteGaussian, SecretKeySampler};
 use primus_integer::FheUint;
 use primus_lattice::{GadgetSize, GlweSize};
 use primus_reduce::RingContext;
@@ -19,15 +19,10 @@ where
     T: FheUint,
     M: RingContext<T>,
 {
-    /// The modulus, refers to **Q** in the paper.
     cipher_modulus: M,
-    /// **RLWE** cipher modulus minus one, refers to **Q-1**.
     cipher_modulus_minus_one: T,
     cipher_modulus_uniform_distr: Uniform<T>,
-    /// The distribution type of the secret key.
-    secret_key_distr: SecretKeyDistr,
-    secret_key_distribution: Option<DiscreteGaussian<T>>,
-    /// The noise's distribution.
+    secret_key_sampler: SecretKeySampler<T>,
     noise_distribution: DiscreteGaussian<T>,
 }
 
@@ -39,7 +34,7 @@ where
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.cipher_modulus == other.cipher_modulus
-            && self.secret_key_distr == other.secret_key_distr
+            && self.secret_key_distr() == other.secret_key_distr()
             && self.noise_distribution.standard_deviation()
                 == other.noise_distribution.standard_deviation()
     }
@@ -52,6 +47,14 @@ where
 {
     /// Creates GLWE encryption and secret-key parameters without ciphertext
     /// sizes or plaintext encoding.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the secret-key sampler violates [`SecretKeySampler::new`]'s
+    /// validity rules, its support does not fit below the ciphertext modulus,
+    /// or the noise sampler violates [`DiscreteGaussian::new`]'s.
+    /// Fixed secret-key weights are checked against the complete key length
+    /// when sampling.
     pub fn new(
         cipher_modulus: M,
         secret_key_distr: SecretKeyDistr,
@@ -63,19 +66,17 @@ where
             DiscreteGaussian::new(noise_standard_deviation, cipher_modulus_minus_one).unwrap();
 
         let cipher_modulus_uniform_distr = cipher_modulus.uniform_distribution();
-        let secret_key_distribution =
-            if let SecretKeyDistr::Gaussian { standard_deviation } = secret_key_distr {
-                Some(DiscreteGaussian::new(standard_deviation, cipher_modulus_minus_one).unwrap())
-            } else {
-                None
-            };
+        let secret_key_sampler = SecretKeySampler::new(secret_key_distr);
+        assert!(
+            secret_key_sampler.maximum_magnitude() <= cipher_modulus_minus_one,
+            "secret-key magnitude bound must be less than the ciphertext modulus"
+        );
 
         Self {
             cipher_modulus,
             cipher_modulus_minus_one,
             cipher_modulus_uniform_distr,
-            secret_key_distr,
-            secret_key_distribution,
+            secret_key_sampler,
             noise_distribution,
         }
     }
@@ -107,13 +108,14 @@ where
     /// Returns the secret-key distribution type.
     #[inline]
     pub fn secret_key_distr(&self) -> SecretKeyDistr {
-        self.secret_key_distr
+        self.secret_key_sampler.distr()
     }
 
-    /// Returns the Gaussian secret-key distribution, when configured.
+    /// Returns shared precomputation for signed and encoded secret coefficients.
+    #[must_use]
     #[inline]
-    pub fn secret_key_distribution(&self) -> Option<&DiscreteGaussian<T>> {
-        self.secret_key_distribution.as_ref()
+    pub fn secret_key_sampler(&self) -> &SecretKeySampler<T> {
+        &self.secret_key_sampler
     }
 
     /// Returns the noise distribution.
@@ -122,7 +124,11 @@ where
         &self.noise_distribution
     }
 
-    /// Returns a noise distribution whose variance is divided by `count`.
+    /// Returns noise with standard deviation `max(sigma / sqrt(count), min_sigma)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting standard deviation is rejected by [`DiscreteGaussian::new`].
     #[inline]
     pub fn noise_distribution_div_count(&self, count: u32, min_sigma: f64) -> DiscreteGaussian<T> {
         let noise_standard_deviation = self.noise_distribution.standard_deviation();
@@ -153,6 +159,7 @@ where
     ///
     /// Plaintext parameters must satisfy [`ScaledCodec::new`]'s fixed-scale
     /// recovery bound; invalid parameters panic.
+    /// Samplers must satisfy [`GlweParametersInner::new`]'s validity rules.
     pub fn new(
         dimension: usize,
         poly_length: usize,
@@ -245,7 +252,11 @@ where
         self.inner.cipher_modulus()
     }
 
-    /// Returns the cipher modulus of this [`GlweParameters<T, M>`].
+    /// Returns the explicit ciphertext modulus.
+    ///
+    /// # Panics
+    ///
+    /// Panics for the native modulus, whose value is not representable in `T`.
     #[inline]
     pub fn cipher_modulus_value(&self) -> T {
         self.inner
@@ -268,9 +279,11 @@ where
         self.inner.secret_key_distr()
     }
 
-    /// Returns the secret key distribution of this [`GlweParameters<T, M>`].
-    pub fn secret_key_distribution(&self) -> Option<&DiscreteGaussian<T>> {
-        self.inner.secret_key_distribution()
+    /// Returns shared precomputation for signed and encoded secret coefficients.
+    #[must_use]
+    #[inline]
+    pub fn secret_key_sampler(&self) -> &SecretKeySampler<T> {
+        self.inner.secret_key_sampler()
     }
 
     /// Returns a reference to the noise distribution of this [`GlweParameters<T, M>`].
@@ -279,7 +292,8 @@ where
         self.inner.noise_distribution()
     }
 
-    /// Returns the noise distribution.
+    /// Forwards to [`GlweParametersInner::noise_distribution_div_count`],
+    /// including its minimum-sigma bound and panic conditions.
     #[inline]
     pub fn noise_distribution_div_count(&self, count: u32, min_sigma: f64) -> DiscreteGaussian<T> {
         self.inner.noise_distribution_div_count(count, min_sigma)

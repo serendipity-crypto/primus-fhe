@@ -54,22 +54,28 @@ These constructors reject excessive weights and sum overflow immediately. The
 length is not retained, and raw enum construction remains possible, so sampling
 boundaries still validate the actual output length.
 
-`EncodedSecretKeySampler<T>::new(distribution, modulus_minus_one)` and
-`SignedSecretKeySampler<S>::new(distribution)` prepare whole-key sampling.
-They own matching Gaussian tables and binary/ternary probability thresholds and expose `distr()`,
-`sample(length, rng)` and `sample_to(output, rng)`. The latter overwrites caller
-storage without allocating. Fixed weights apply to the complete output, and
-invalid output lengths are rejected before writing or sampling. These whole-key
-samplers do not implement scalar `Distribution`: fixed weights correlate the
-coefficients. LWE and NTRU parameters retain these samplers for reuse; GLWE
-coefficient-key generation prepares one from its distribution descriptor.
+`SecretKeySampler<T>::new(distribution)` prepares one set of Gaussian tables
+and binary/ternary probability thresholds for both output representations. `T`
+is the unsigned type; signed output uses `T::SignedInteger`. Use
+`sample_signed(length, rng)` / `sample_signed_to(output, rng)` for signed keys,
+or `sample_encoded(length, modulus_minus_one, rng)` /
+`sample_encoded_to(output, modulus_minus_one, rng)` for canonical residues.
+The `_to` methods overwrite caller storage without allocating. Fixed weights
+apply to the complete output; invalid lengths are rejected before writing or
+sampling. Whole-key samplers do not implement scalar `Distribution` because
+fixed weights correlate coefficients.
 
-`SignedSecretKeySampler::maximum_magnitude()` returns an inclusive unsigned
-sample bound. Parameters can check it once against a target modulus before
-using bounded signed encoding. Gaussian sampling uses its truncated support;
-binary and ternary sampling conservatively return one. The underlying
-`SignedDiscreteGaussian::maximum_magnitude()` also respects custom backend
-tail cuts. Neither sampler stores a ciphertext modulus.
+`maximum_magnitude()` returns an inclusive unsigned sample bound. Gaussian
+support must fit the signed companion type at construction; binary and ternary
+sampling conservatively return one. Encoded sampling requires
+`modulus_minus_one >= maximum_magnitude()`, with `T::MAX` denoting the native
+modulus. This is a caller contract, checked once by LWE, GLWE, RNS GLWE and NTRU
+parameter constructors, rather than on every batch. Parameters retain the
+sampler for reuse.
+
+The underlying `SignedDiscreteGaussian::maximum_magnitude()` also respects
+custom backend tail cuts. Neither the shared secret-key sampler nor the signed
+Gaussian sampler stores a ciphertext modulus.
 
 Custom-probability and fixed-weight binary/ternary vector helpers also have
 `_to` variants. Encoded samplers emit residues directly; they do not first

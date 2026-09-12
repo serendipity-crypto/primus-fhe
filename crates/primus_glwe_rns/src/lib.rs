@@ -33,21 +33,7 @@ pub use parameter::{
     DcrtGadgetDomain, GadgetDomainError, HybridRnsKeySwitchDomain,
 };
 pub use primus_encoding::BfvRnsCodec;
-pub use primus_glwe::{GlweSecretKey, GlweSecretKeyParameterSet, SecretKeyDistr};
+pub use primus_glwe::{GlweSecretKey, SecretKeyDistr};
 pub use primus_lattice::{RnsGadgetSize, RnsGlweSize};
 pub use public_key::DcrtGlwePublicKey;
 pub use secret_key::{DcrtGlweDecryptContext, DcrtGlweSecretKey};
-
-impl<T, M> GlweSecretKeyParameterSet<T> for CrtGlweParameters<T, M>
-where
-    T: primus_integer::FheUint,
-    M: primus_reduce::FieldContext<T>,
-{
-    fn secret_key_size(&self) -> primus_lattice::GlweSize {
-        self.size().glwe_size()
-    }
-
-    fn secret_key_distr(&self) -> SecretKeyDistr {
-        self.secret_key_distr()
-    }
-}

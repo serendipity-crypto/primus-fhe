@@ -5,9 +5,9 @@ use primus_glwe::{
     SecretKeyDistr,
 };
 use primus_integer::FheUint;
-use primus_lattice::glwe::FourierGlweOwned;
 use primus_modulus::NativeModulus;
 use primus_poly::Polynomial;
+use rand::{SeedableRng, rngs::StdRng};
 
 const DIMENSION: usize = 2;
 const POLY_LENGTH: usize = 256;
@@ -19,7 +19,7 @@ where
 {
     let table = RustFftTable::new(POLY_LENGTH.trailing_zeros()).unwrap();
     let mut fft = FftEngine::new(&table);
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     let messages: Vec<T> = (0..POLY_LENGTH)
         .map(|index| T::try_from(index % PLAIN_MODULUS).unwrap())
         .collect();
@@ -39,18 +39,11 @@ where
             0.7,
         );
         let secret_key = FourierGlweSecretKey::generate(&params, &mut fft, &mut rng);
-        let mut cipher = FourierGlweOwned::zero((DIMENSION + 1) * fft.fourier_length());
         let mut encrypt_context = FourierGlweEncryptContext::new(POLY_LENGTH);
         let mut decrypt_context = FourierGlweDecryptContext::new(POLY_LENGTH);
 
-        secret_key.encrypt_to(
-            &message,
-            &mut cipher,
-            &params,
-            &mut fft,
-            &mut rng,
-            &mut encrypt_context,
-        );
+        let mut cipher =
+            secret_key.encrypt(&message, &params, &mut fft, &mut rng, &mut encrypt_context);
         assert_eq!(
             secret_key
                 .decrypt(&cipher, &params, &mut fft, &mut decrypt_context)

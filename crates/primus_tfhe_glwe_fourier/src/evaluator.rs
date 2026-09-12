@@ -132,7 +132,6 @@ where
         self.server_key.glwe_key_switching_key().key_switch_to(
             &self.main_glwe,
             &mut self.switched,
-            parameters.glwe_key_switching().output(),
             &mut self.fft,
             &mut self.key_switching,
         );
@@ -159,7 +158,6 @@ where
         self.server_key.glwe_key_switching_key().key_switch_to(
             &self.main_glwe,
             &mut self.switched,
-            parameters.glwe_key_switching().output(),
             &mut self.fft,
             &mut self.key_switching,
         );

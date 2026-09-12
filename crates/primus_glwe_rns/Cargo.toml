@@ -41,10 +41,6 @@ name = "expand_coeff"
 harness = false
 
 [[bench]]
-name = "expand_coeff_components"
-harness = false
-
-[[bench]]
 name = "key_switching"
 harness = false
 

@@ -10,10 +10,11 @@ use primus_lattice::{
     glev::Glev,
 };
 use primus_ntt::NttTable;
-use primus_poly::PolynomialOwned;
+use primus_poly::Polynomial;
 use primus_reduce::FieldContext;
+use zeroize::Zeroizing;
 
-use crate::{GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext, NttGlweSecretKey};
+use crate::{GlevParameters, GlweSecretKey, NttGadgetEncryptContext, NttGlweSecretKey};
 
 /// Reusable workspace for GLev-to-GGSW scheme switching.
 pub struct NttGlweSchemeSwitchContext<T: FheUint> {
@@ -45,16 +46,24 @@ pub struct NttGlweSchemeSwitchKey<T: FheUint> {
 impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
     /// Generates a scheme-switching key for one output GGSW layout.
     ///
+    /// # Panics
+    ///
+    /// Panics if key/output layouts, NTT length/modulus or gadget workspace
+    /// are incompatible with `key_parameters`. Checks precede sampling.
+    ///
     /// # Correctness
     ///
     /// Every signed coefficient in `secret_key` must satisfy `s.unsigned_abs() < q`,
-    /// where `q` is the ciphertext modulus in `key_domain`; see
+    /// where `q` is the ciphertext modulus in `key_parameters`; see
     /// [`EncodeSigned::encode_signed`](primus_reduce::EncodeSigned::encode_signed).
+    /// `secret_key` and `ntt_secret_key` must represent the same secret; this
+    /// relationship is not checked. The NTT key must use the supplied table's representation.
     pub fn generate<M, Table, R>(
         secret_key: &GlweSecretKey<T>,
         ntt_secret_key: &NttGlweSecretKey<T>,
-        key_domain: &NttGadgetDomain<'_, T, M, Table>,
         output_size: GadgetSize,
+        key_parameters: &GlevParameters<T, M>,
+        ntt: &Table,
         rng: &mut R,
         context: &mut NttGadgetEncryptContext<T>,
     ) -> Self
@@ -63,27 +72,28 @@ impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
         Table: NttTable<ValueT = T>,
         R: rand::Rng + rand::CryptoRng,
     {
-        let key_parameters = key_domain.parameters();
+        ntt_secret_key.assert_gadget_compatible(key_parameters, ntt);
+        context.assert_ggsw_compatible(key_parameters.size());
         let key_size = key_parameters.size();
         assert_eq!(secret_key.glwe_size(), key_size.glwe_size());
-        assert_eq!(ntt_secret_key.glwe_size(), key_size.glwe_size());
         assert_eq!(output_size.glwe_size(), key_size.glwe_size());
 
         let dimension = key_size.glwe_size().dimension();
         let mut data = vec![T::ZERO; dimension * key_size.ggsw_len()];
-        let mut negated_secret = PolynomialOwned::zero(key_size.glwe_size().poly_length());
+        let mut negated_secret = Zeroizing::new(vec![T::ZERO; key_size.glwe_size().poly_length()]);
         let modulus = key_parameters.cipher_modulus();
 
         for (secret_polynomial, key_ciphertext) in secret_key
             .iter()
             .zip(data.chunks_exact_mut(key_size.ggsw_len()))
         {
-            modulus.encode_signed_slice_to(secret_polynomial, negated_secret.as_mut());
-            modulus.reduce_neg_slice_assign(negated_secret.as_mut());
-            ntt_secret_key.encrypt_ggsw_to(
-                &negated_secret,
+            modulus.encode_signed_slice_to(secret_polynomial, negated_secret.as_mut_slice());
+            modulus.reduce_neg_slice_assign(negated_secret.as_mut_slice());
+            ntt_secret_key.encrypt_ggsw_kernel_to(
+                &Polynomial::new(negated_secret.as_slice()),
                 &mut NttGgsw::new(key_ciphertext),
-                key_domain,
+                key_parameters,
+                ntt,
                 rng,
                 context,
             );
@@ -93,7 +103,7 @@ impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
             data,
             key_size,
             output_size,
-            key_basis: key_domain.basis().clone(),
+            key_basis: key_parameters.basis().clone(),
         }
     }
 
@@ -116,11 +126,26 @@ impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
     }
 
     /// Converts a coefficient-domain GLev into an NTT-domain GGSW.
+    ///
+    /// Uses the stored layout and key decomposition basis. The output preserves
+    /// the input GLev's gadget scaling; the key basis only decomposes products.
+    ///
+    /// # Correctness
+    ///
+    /// The input GLev must be encrypted under the secret used to generate this key.
+    /// Input coefficients must be canonical modulo `modulus`. The NTT table
+    /// must use the transform representation used to generate this key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if input/output or workspace layouts, the modulus, or the NTT
+    /// length/modulus do not match the key. Checks precede output writes.
     pub fn apply_to<M, Table, A, B>(
         &self,
         input: &Glev<A>,
         output: &mut NttGgsw<B>,
-        key_domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweSchemeSwitchContext<T>,
     ) where
         M: FieldContext<T>,
@@ -139,14 +164,19 @@ impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
             "scheme-switch output GGSW layout mismatch"
         );
         assert_eq!(
-            key_domain.size(),
-            self.key_size,
-            "scheme-switch key domain mismatch"
+            ntt.poly_length(),
+            self.key_size.glwe_size().poly_length(),
+            "scheme-switch NTT polynomial length mismatch"
         );
         assert_eq!(
-            key_domain.basis(),
-            &self.key_basis,
-            "scheme-switch decomposition basis mismatch"
+            Some(modulus.value()),
+            self.key_basis.modulus(),
+            "scheme-switch ciphertext modulus mismatch"
+        );
+        assert_eq!(
+            ntt.modulus(),
+            modulus.value(),
+            "NTT ciphertext modulus mismatch"
         );
         assert_eq!(
             context.external_product.size(),
@@ -158,9 +188,7 @@ impl<T: FheUint> NttGlweSchemeSwitchKey<T> {
         let poly_length = glwe_size.poly_length();
         let glwe_len = glwe_size.glwe_len();
         let output_glev_len = self.output_size.glev_len();
-        let key_basis = key_domain.basis();
-        let modulus = key_domain.parameters().cipher_modulus();
-        let ntt = key_domain.table();
+        let key_basis = &self.key_basis;
 
         let mut output_rows = output.iter_ntt_glev_mut(output_glev_len);
         for (key, mut output_row) in

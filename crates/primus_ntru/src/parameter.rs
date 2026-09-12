@@ -1,7 +1,7 @@
 //! Parameters shared by the NTT and Fourier NTRU backends.
 
 use primus_decompose::{ApproxSignedBasisError, primitive::ApproxSignedBasis};
-use primus_distr::{DiscreteGaussian, SignedSecretKeySampler};
+use primus_distr::{DiscreteGaussian, SecretKeySampler};
 use primus_encoding::ScaledCodec;
 use primus_integer::FheUint;
 use primus_lattice::{MAX_POLY_LENGTH, MIN_POLY_LENGTH};
@@ -26,7 +26,7 @@ where
 {
     poly_length: usize,
     cipher_modulus: M,
-    secret_key_sampler: SignedSecretKeySampler<T::SignedInteger>,
+    secret_key_sampler: SecretKeySampler<T>,
     noise_distribution: DiscreteGaussian<T>,
     plaintext_codec: ScaledCodec<T>,
 }
@@ -65,7 +65,7 @@ where
         let modulus_minus_one = cipher_modulus.minus_one();
         let noise_distribution = DiscreteGaussian::new(noise_standard_deviation, modulus_minus_one)
             .expect("invalid Gaussian NTRU noise distribution");
-        let secret_key_sampler = SignedSecretKeySampler::new(secret_key_distr);
+        let secret_key_sampler = SecretKeySampler::new(secret_key_distr);
         assert!(
             secret_key_sampler.maximum_magnitude() <= modulus_minus_one,
             "NTRU secret-key magnitude bound must be less than the ciphertext modulus"
@@ -118,7 +118,7 @@ where
 
     /// Returns the prepared coefficient-key sampler.
     #[inline]
-    pub(crate) fn secret_key_sampler(&self) -> &SignedSecretKeySampler<T::SignedInteger> {
+    pub(crate) fn secret_key_sampler(&self) -> &SecretKeySampler<T> {
         &self.secret_key_sampler
     }
 

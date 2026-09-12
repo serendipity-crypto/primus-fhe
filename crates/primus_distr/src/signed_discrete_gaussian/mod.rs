@@ -1,4 +1,4 @@
-use primus_integer::{FheInt, SignedInteger};
+use primus_integer::{FheInt, FheUint, SignedInteger};
 use rand::distr::Distribution;
 
 use crate::{
@@ -103,6 +103,49 @@ impl<T: FheInt + SignedInteger> SignedDiscreteGaussian<T> {
         match self {
             Self::Cdt(sampler) => crate::gaussian_core::sample_to(output, sampler, rng),
             Self::Ziggurat(sampler) => crate::gaussian_core::sample_to(output, sampler, rng),
+        }
+    }
+
+    /// Initializes encoded storage directly after the owner validates the modulus.
+    pub(crate) fn sample_encoded<U: FheUint, R: rand::Rng + rand::CryptoRng>(
+        &self,
+        length: usize,
+        modulus_minus_one: U,
+        rng: &mut R,
+    ) -> Vec<U>
+    where
+        T: SignedInteger<UnsignedInteger = U>,
+    {
+        match self {
+            Self::Cdt(sampler) => (0..length)
+                .map(|_| sampler.sample_encoded(modulus_minus_one, rng))
+                .collect(),
+            Self::Ziggurat(sampler) => (0..length)
+                .map(|_| sampler.sample_encoded(modulus_minus_one, rng))
+                .collect(),
+        }
+    }
+
+    /// Selects the encoded batch kernel once using the shared Gaussian tables.
+    pub(crate) fn sample_encoded_to<U: FheUint, R: rand::Rng + rand::CryptoRng>(
+        &self,
+        output: &mut [U],
+        modulus_minus_one: U,
+        rng: &mut R,
+    ) where
+        T: SignedInteger<UnsignedInteger = U>,
+    {
+        match self {
+            Self::Cdt(sampler) => {
+                for value in output {
+                    *value = sampler.sample_encoded(modulus_minus_one, rng);
+                }
+            }
+            Self::Ziggurat(sampler) => {
+                for value in output {
+                    *value = sampler.sample_encoded(modulus_minus_one, rng);
+                }
+            }
         }
     }
 }

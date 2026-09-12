@@ -3,14 +3,11 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use primus_distr::{
-    EncodedSecretKeySampler, SecretKeyDistr, SignedSecretKeySampler,
-    sample_crt_sparse_ternary_values_to,
-};
+use primus_distr::{SecretKeyDistr, SecretKeySampler, sample_crt_sparse_ternary_values_to};
 use rand::{SeedableRng, rngs::StdRng};
 
-fn sample_secret_key(c: &mut Criterion) {
-    let mut group = c.benchmark_group("secret_key_sample_to");
+fn signed_sampling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("secret_key/signed_i32_to");
     for length in [1024, 16384] {
         let mut output = vec![0i32; length];
         let mut rng = StdRng::seed_from_u64(301);
@@ -43,19 +40,21 @@ fn sample_secret_key(c: &mut Criterion) {
             ("gaussian", SecretKeyDistr::gaussian(3.2)),
             ("gaussian_ziggurat", SecretKeyDistr::gaussian(30.0)),
         ] {
-            let sampler = SignedSecretKeySampler::<i32>::new(distr);
+            let sampler = SecretKeySampler::<u32>::new(distr);
             group.throughput(Throughput::Elements(length as u64));
-            group.bench_with_input(BenchmarkId::new(name, length), &length, |b, _| {
+            group.bench_function(BenchmarkId::new(name, length), |b| {
                 b.iter(|| {
-                    sampler.sample_to(black_box(&mut output), &mut rng);
+                    sampler.sample_signed_to(black_box(&mut output), &mut rng);
                     black_box(&output);
                 })
             });
         }
     }
     group.finish();
+}
 
-    let mut group = c.benchmark_group("crt_sparse_ternary_sample_to");
+fn crt_sampling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("secret_key/crt_sparse_ternary_u64_to");
     for length in [1024, 16384] {
         for count in [2, 8] {
             let moduli_minus_one: Vec<u64> =
@@ -79,40 +78,81 @@ fn sample_secret_key(c: &mut Criterion) {
     group.finish();
 }
 
-fn sample_gaussian_secret_key(c: &mut Criterion) {
-    let mut group = c.benchmark_group("encoded_secret_key_sample_to");
+fn encoded_sampling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("secret_key/encoded_u32_to");
     for length in [1024, 16384] {
-        let mut output = vec![0u64; length];
-        for (name, sigma) in [("gaussian", 3.2), ("gaussian_ziggurat", 30.0)] {
-            let sampler = EncodedSecretKeySampler::new(SecretKeyDistr::gaussian(sigma), u64::MAX);
-            let mut rng = StdRng::seed_from_u64(303);
+        let mut output = vec![0u32; length];
+        for (name, distr) in [
+            ("uniform_binary", SecretKeyDistr::UniformBinary),
+            ("ternary", SecretKeyDistr::ternary(0.2, 0.4)),
+            (
+                "fixed_binary_dense",
+                SecretKeyDistr::fixed_hamming_weight_binary(length, length / 2),
+            ),
+            (
+                "fixed_composition_dense",
+                SecretKeyDistr::fixed_composition_ternary(length, length / 3, length / 3),
+            ),
+        ] {
+            let sampler = SecretKeySampler::<u32>::new(distr);
+            let mut rng = StdRng::seed_from_u64(305);
             group.throughput(Throughput::Elements(length as u64));
             group.bench_function(BenchmarkId::new(name, length), |b| {
-                b.iter(|| sampler.sample_to(black_box(&mut output), &mut rng));
+                b.iter(|| {
+                    sampler.sample_encoded_to(black_box(&mut output), 132_120_576u32, &mut rng)
+                });
             });
         }
     }
     group.finish();
 
-    // Includes allocation: this is the owning key-generation path.
-    let mut group = c.benchmark_group("gaussian_secret_key_sample");
-    let length = 16384;
-    group.throughput(Throughput::Elements(length as u64));
-    for (name, sigma) in [("cdt", 3.2), ("ziggurat", 30.0)] {
-        let distr = SecretKeyDistr::gaussian(sigma);
-        let signed = SignedSecretKeySampler::<i32>::new(distr);
-        let encoded = EncodedSecretKeySampler::new(distr, u64::MAX);
-        let mut rng = StdRng::seed_from_u64(304);
-        group.bench_function(BenchmarkId::new(format!("signed_{name}"), length), |b| {
-            b.iter(|| black_box(signed.sample(length, &mut rng)));
-        });
-        let mut rng = StdRng::seed_from_u64(304);
-        group.bench_function(BenchmarkId::new(format!("encoded_{name}"), length), |b| {
-            b.iter(|| black_box(encoded.sample(length, &mut rng)));
-        });
+    let mut group = c.benchmark_group("secret_key/encoded_u64_to");
+    for length in [1024, 16384] {
+        let mut output = vec![0u64; length];
+        for (name, sigma) in [("gaussian", 3.2), ("gaussian_ziggurat", 30.0)] {
+            let sampler = SecretKeySampler::<u64>::new(SecretKeyDistr::gaussian(sigma));
+            let mut rng = StdRng::seed_from_u64(303);
+            group.throughput(Throughput::Elements(length as u64));
+            group.bench_function(BenchmarkId::new(name, length), |b| {
+                b.iter(|| sampler.sample_encoded_to(black_box(&mut output), u64::MAX, &mut rng));
+            });
+        }
     }
     group.finish();
 }
 
-criterion_group!(benches, sample_secret_key, sample_gaussian_secret_key);
+fn allocating_sampling(c: &mut Criterion) {
+    // Includes allocation: this is the owning key-generation path.
+    let mut group = c.benchmark_group("secret_key/gaussian_allocating");
+    let length = 16384;
+    group.throughput(Throughput::Elements(length as u64));
+    for (name, sigma) in [("cdt", 3.2), ("ziggurat", 30.0)] {
+        let distr = SecretKeyDistr::gaussian(sigma);
+        let signed = SecretKeySampler::<u32>::new(distr);
+        let encoded = SecretKeySampler::<u64>::new(distr);
+        let mut rng = StdRng::seed_from_u64(304);
+        group.bench_function(
+            BenchmarkId::new(format!("signed_i32_{name}"), length),
+            |b| {
+                b.iter(|| black_box(signed.sample_signed(length, &mut rng)));
+            },
+        );
+        let mut rng = StdRng::seed_from_u64(304);
+        group.bench_function(
+            BenchmarkId::new(format!("encoded_u64_{name}"), length),
+            |b| {
+                b.iter(|| black_box(encoded.sample_encoded(length, u64::MAX, &mut rng)));
+            },
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    signed_sampling,
+    encoded_sampling,
+    allocating_sampling,
+    crt_sampling
+);
 criterion_main!(benches);

@@ -76,6 +76,24 @@ impl FftTable for TfheFftTable {
         self.h
     }
 
+    fn automorphism_map(&self, degree: usize) -> Vec<(usize, bool)> {
+        // tfhe-fft 0.10 unordered::Plan stores standard bin i at bit_rev_twice(i),
+        // as used by its Fourier-buffer serialization. The ordered base size is
+        // plan-specific; equal transform lengths do not imply equal permutations.
+        let bits = self.h.trailing_zeros();
+        let base_bits = self.plan.algo().1.trailing_zeros();
+        let low_mask = (1usize << base_bits) - 1;
+        crate::automorphism::automorphism_map(self.n, degree, |index| {
+            let reversed = index.reverse_bits() >> (usize::BITS - bits);
+            let low = if base_bits == 0 {
+                0
+            } else {
+                reversed.reverse_bits() >> (usize::BITS - base_bits)
+            };
+            (reversed & !low_mask) | low
+        })
+    }
+
     fn new_scratch(&self) -> Self::Scratch {
         TfheFftScratch {
             values: vec![Complex64::default(); self.h],
@@ -128,6 +146,53 @@ impl FftTable for TfheFftTable {
             let value = value * inverse_twist;
             *first = T::from_torus_f64(value.re);
             *second = T::from_torus_f64(value.im);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FftEngine;
+    use tfhe_fft::ordered::FftAlgo;
+
+    #[test]
+    fn automorphism_map_tracks_ordered_base_size() {
+        let mut table = TfheFftTable::new(10).unwrap();
+        // Force distinct unordered layouts rather than relying on the planner
+        // to choose different base sizes on a particular CPU.
+        for base_n in [table.h, table.h / 2, table.h / 8] {
+            table.plan = Plan::new(
+                table.h,
+                Method::UserProvided {
+                    base_algo: FftAlgo::Dif2,
+                    base_n,
+                },
+            );
+            let mut fft = FftEngine::new(&table);
+            let mut coefficients = vec![0.0; table.n];
+            coefficients[1] = 1.0;
+            let mut input = vec![Complex64::default(); table.h];
+            let mut expected = input.clone();
+            fft.forward_integer_f64(&coefficients, &mut input);
+            for degree in [3, 5, table.n + 1, 2 * table.n - 1] {
+                coefficients.fill(0.0);
+                coefficients[degree % table.n] = if degree < table.n { 1.0 } else { -1.0 };
+                fft.forward_integer_f64(&coefficients, &mut expected);
+                for (&expected, (source, conjugate)) in
+                    expected.iter().zip(table.automorphism_map(degree))
+                {
+                    let actual = if conjugate {
+                        input[source].conj()
+                    } else {
+                        input[source]
+                    };
+                    assert!(
+                        (actual - expected).norm() < 1e-12,
+                        "base={base_n}, degree={degree}"
+                    );
+                }
+            }
         }
     }
 }

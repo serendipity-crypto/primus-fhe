@@ -25,6 +25,19 @@ pub trait FftTable: Send + Sync {
     fn poly_length(&self) -> usize;
     /// Returns the number of complex Fourier values, `N / 2`.
     fn fourier_length(&self) -> usize;
+    /// Builds the frequency permutation for the negacyclic automorphism `X -> X^degree`.
+    /// Entry j is `(source, conjugate)`: `output[j]` is `input[source]`, conjugated
+    /// when requested. The map contains exactly N/2 entries and is bound to this
+    /// table instance's Fourier order. It applies to real coefficient polynomials
+    /// at either integer or torus scale. It performs no key switching.
+    ///
+    /// Allocate this map during evaluation-key construction and reuse it.
+    ///
+    /// # Panics
+    /// Panics unless degree is odd and in `1..2N`, or 2N overflows usize.
+    #[must_use]
+    fn automorphism_map(&self, degree: usize) -> Vec<(usize, bool)>;
+
     /// Allocates a workspace compatible with this table instance.
     fn new_scratch(&self) -> Self::Scratch;
     /// Transforms torus coefficients, scaled by `2^-BITS`, to this table's

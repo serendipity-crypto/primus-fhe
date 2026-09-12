@@ -93,7 +93,7 @@ impl<T: FheUint> CircuitBootstrapParameters<T> {
         &self.output
     }
 
-    /// Returns the decomposition parameters used by HomTrace automorphism
+    /// Returns the decomposition parameters used by trace automorphism
     /// keys.
     #[inline]
     pub fn trace(&self) -> &GlevParameters<T, BarrettModulus<T>> {

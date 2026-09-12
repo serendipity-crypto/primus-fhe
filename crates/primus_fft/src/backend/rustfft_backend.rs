@@ -79,6 +79,10 @@ impl FftTable for RustFftTable {
         self.h
     }
 
+    fn automorphism_map(&self, degree: usize) -> Vec<(usize, bool)> {
+        crate::automorphism::automorphism_map(self.n, degree, core::convert::identity)
+    }
+
     fn new_scratch(&self) -> Self::Scratch {
         let scratch_len = self
             .forward

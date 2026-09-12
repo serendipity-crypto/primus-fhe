@@ -72,6 +72,10 @@ Table 不可变并实现 `Send + Sync`，因此可以在线程间共享。每个
 
 长度错误或 workspace 不兼容会触发 panic。
 
+`FftTable::automorphism_map(degree)` 为 `X -> X^degree` 分配 Fourier 映射，其中 `degree` 是 `[1, 2N)` 内的奇数。第 `j` 项给出输出 `j` 对应的 `(source, conjugate)`。
+
+应在求值密钥构造时创建并缓存映射，并复用原 table 实例。自定义 `FftTable` 实现必须按自身存储顺序提供映射。单独应用映射不执行密码学 key switching。
+
 ## 长度与精度
 
 `FftTable::new(log_n)` 接受 `2 <= log_n <= usize::BITS - 1`，因此支持的最小

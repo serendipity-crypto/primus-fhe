@@ -51,9 +51,17 @@ fn bench_key_switching(c: &mut Criterion) {
             SecretKeyDistr::SparseTernary,
             3.20,
         );
-        let input_sk = GlweSecretKey::generate(&glwe_params, &mut rng);
+        let input_sk = GlweSecretKey::generate(
+            glwe_params.size().glwe_size(),
+            glwe_params.secret_key_sampler(),
+            &mut rng,
+        );
         let input_dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&input_sk, &q_table);
-        let output_sk = GlweSecretKey::generate(&glwe_params, &mut rng);
+        let output_sk = GlweSecretKey::generate(
+            glwe_params.size().glwe_size(),
+            glwe_params.secret_key_sampler(),
+            &mut rng,
+        );
         let output_dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&output_sk, &q_table);
 
         let glev_params =
@@ -97,20 +105,16 @@ fn bench_key_switching(c: &mut Criterion) {
         group.throughput(Throughput::Elements(poly_length as u64));
         let n_label = format!("N={poly_length}");
 
-        group.bench_with_input(
-            BenchmarkId::new("CRT-bit-decomposition", &n_label),
-            &(),
-            |b, _| {
-                b.iter(|| {
-                    crt_ksk.key_switch_to(
-                        black_box(&input_coeff),
-                        black_box(&mut crt_output),
-                        black_box(&dcrt_domain),
-                        black_box(&mut crt_context),
-                    );
-                });
-            },
-        );
+        group.bench_function(BenchmarkId::new("CRT-bit-decomposition", &n_label), |b| {
+            b.iter(|| {
+                crt_ksk.key_switch_to(
+                    black_box(&input_coeff),
+                    black_box(&mut crt_output),
+                    black_box(&dcrt_domain),
+                    black_box(&mut crt_context),
+                );
+            });
+        });
 
         for (partition_label, decomposition_count) in HYBRID_CASES {
             let hybrid_rns = HybridRNS::new(&q_moduli, &p_moduli, decomposition_count).unwrap();
@@ -142,10 +146,9 @@ fn bench_key_switching(c: &mut Criterion) {
                 input,
             );
 
-            group.bench_with_input(
+            group.bench_function(
                 BenchmarkId::new(format!("Hybrid-RNS-{partition_label}"), &n_label),
-                &(),
-                |b, _| {
+                |b| {
                     b.iter(|| {
                         hybrid_ksk.key_switch_to(
                             black_box(&input_ciphertext),

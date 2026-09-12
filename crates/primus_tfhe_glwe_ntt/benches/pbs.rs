@@ -1,3 +1,4 @@
+use rand::{SeedableRng, rngs::StdRng};
 // cargo bench -p primus_tfhe_glwe_ntt --bench pbs
 
 use std::hint::black_box;
@@ -44,7 +45,7 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
     let poly_length = parameters.glwe().poly_length();
     let table = U32NttTable::new(poly_length.trailing_zeros(), modulus).unwrap();
     let context = TfheContext::try_new(parameters, table).unwrap();
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     let (client_key, server_key) = context.generate_keys(&mut rng).unwrap();
     let parameters = context.parameters();
     let encryptor = context.encryptor(&client_key).unwrap();
@@ -62,11 +63,10 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
     let mut output = input.clone();
     let mut many_outputs = vec![input.clone(); many_lookup_table.output_count()];
 
-    let bootstrapping_domain = context.bootstrapping_domain();
-    let mut blind_rotation = NttGlweBlindRotationContext::new(bootstrapping_domain.size());
-    let key_switching_domain = context.key_switching_domain();
-    let mut key_switching =
-        NttGlweKeySwitchingContext::new(key_switching_domain.size().glwe_size());
+    let mut blind_rotation = NttGlweBlindRotationContext::new(parameters.bootstrapping().size());
+    let mut key_switching = NttGlweKeySwitchingContext::new(
+        parameters.glwe_key_switching().output().size().glwe_size(),
+    );
     let mut main_glwe: GlweCiphertext<Vec<u32>> =
         GlweCiphertext::zero(parameters.glwe().glwe_len());
     let mut switched: GlweCiphertext<Vec<u32>> =
@@ -82,7 +82,8 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
                 input.as_lwe(),
                 lookup_table.polynomial(),
                 &mut main_glwe,
-                &bootstrapping_domain,
+                modulus,
+                context.table(),
                 &mut blind_rotation,
             ),
         PbsOrder::KeyswitchBootstrap => {
@@ -94,7 +95,8 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
     server_key.glwe_key_switching_key().key_switch_to(
         &main_glwe,
         &mut switched,
-        &key_switching_domain,
+        modulus,
+        context.table(),
         &mut key_switching,
     );
     switched.extract_compact_lwe_to(&mut small_lwe, poly_length, modulus);
@@ -134,7 +136,8 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
             server_key.glwe_key_switching_key().key_switch_to(
                 black_box(&main_glwe),
                 black_box(&mut switched),
-                &key_switching_domain,
+                modulus,
+                context.table(),
                 &mut key_switching,
             );
             black_box(&switched);
@@ -156,7 +159,8 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
                 black_box(blind_rotation_input),
                 black_box(lookup_table.polynomial()),
                 black_box(&mut main_glwe),
-                &bootstrapping_domain,
+                modulus,
+                context.table(),
                 &mut blind_rotation,
             );
             black_box(&main_glwe);
@@ -196,14 +200,8 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
             black_box(&many_outputs);
         });
     });
-    for gate in [
-        BooleanGate::And,
-        BooleanGate::Nand,
-        BooleanGate::Or,
-        BooleanGate::Nor,
-        BooleanGate::Xor,
-        BooleanGate::Xnor,
-    ] {
+    // One representative per binary input path: add, and subtract-then-double.
+    for gate in [BooleanGate::And, BooleanGate::Xor] {
         group.bench_function(format!("boolean_{gate:?}").to_lowercase(), |b| {
             b.iter(|| {
                 boolean_evaluator.evaluate_binary_to(

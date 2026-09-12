@@ -7,6 +7,7 @@ edition = "2024"
 primus_data = { path = "../primus_data" }
 primus_decompose = { path = "../primus_decompose" }
 primus_distr = { path = "../primus_distr" }
+primus_factor = { path = "../primus_factor" }
 primus_fft = { path = "../primus_fft" }
 primus_encoding = { path = "../primus_encoding" }
 primus_integer = { path = "../primus_integer" }
@@ -25,13 +26,18 @@ zeroize = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]
-name = "plaintext_codec"
+name = "encryption"
+harness = false
+
+[[bench]]
+name = "primitives"
 harness = false
 
 [features]
 default = []
 simd = [
     "primus_encoding/simd",
+    "primus_factor/simd",
     "primus_integer/simd",
     "primus_modulus/simd",
     "primus_poly/simd",

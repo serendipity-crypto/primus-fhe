@@ -1,5 +1,22 @@
 use primus_lwe::{LweParameters, SecretKeyDistr};
-use primus_modulus::NativeModulus;
+use primus_modulus::{BarrettModulus, NativeModulus};
+
+#[test]
+fn secret_support_is_checked_at_parameter_construction() {
+    for (sigma, valid) in [(1.0, true), (1.1, false)] {
+        // With q = 13, truncated magnitudes 12 and 13 straddle the bound.
+        let result = std::panic::catch_unwind(|| {
+            LweParameters::new(
+                16,
+                2u32,
+                BarrettModulus::new(13),
+                SecretKeyDistr::gaussian(sigma),
+                0.7,
+            )
+        });
+        assert_eq!(result.is_ok(), valid);
+    }
+}
 
 #[test]
 fn parameters_validate_ciphertext_length() {

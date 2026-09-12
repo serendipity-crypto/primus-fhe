@@ -1,11 +1,13 @@
 use std::marker::PhantomData;
 
-use primus_integer::{AsInto, SignedInteger};
+use primus_integer::{AsInto, FheUint, SignedInteger};
 use rand::distr::Distribution;
 
 use crate::{
     DistrErr,
-    gaussian_core::{CDT_MAX_MAGNITUDE, GaussianParameters, build_cdt, encode_signed},
+    gaussian_core::{
+        CDT_MAX_MAGNITUDE, GaussianParameters, build_cdt, encode_modular, encode_signed,
+    },
     utils::cdt_index_by,
 };
 
@@ -50,16 +52,34 @@ impl<T: SignedInteger> SignedCDTSampler<T> {
         // The table includes a lower boundary and a terminal sentinel.
         (self.cdt.len() - 2) as u64
     }
+
+    /// Samples sign and magnitude independently of the output encoding.
+    #[inline]
+    fn sample_magnitude<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> (bool, T) {
+        let random = rng.next_u64();
+        let index = cdt_index_by(&self.cdt, &random, Ord::cmp);
+        (random & 1 == 1, index.as_into())
+    }
+
+    /// Uses the same CDT with a modulus already validated against the support.
+    #[inline]
+    pub(crate) fn sample_encoded<U: FheUint, R: rand::Rng + ?Sized>(
+        &self,
+        modulus_minus_one: U,
+        rng: &mut R,
+    ) -> U
+    where
+        T: SignedInteger<UnsignedInteger = U>,
+    {
+        let (positive, magnitude) = self.sample_magnitude(rng);
+        encode_modular(positive, magnitude.cast_to_unsigned(), modulus_minus_one)
+    }
 }
 
 impl<T: SignedInteger> Distribution<T> for SignedCDTSampler<T> {
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> T {
-        let random: u64 = rng.next_u64();
-        let positive = random & 1 == 1;
-        let index = cdt_index_by(&self.cdt, &random, Ord::cmp);
-        let value: T = index.as_into();
-
-        encode_signed(positive, value)
+        let (positive, magnitude) = self.sample_magnitude(rng);
+        encode_signed(positive, magnitude)
     }
 }

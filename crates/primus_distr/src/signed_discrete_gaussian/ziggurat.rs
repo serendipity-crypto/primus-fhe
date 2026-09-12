@@ -1,9 +1,9 @@
-use primus_integer::{FheInt, SignedInteger};
+use primus_integer::{FheInt, FheUint, SignedInteger};
 use rand::distr::Distribution;
 
 use crate::{
     DistrErr,
-    gaussian_core::{GaussianParameters, ZigguratMagnitudeSampler, encode_signed},
+    gaussian_core::{GaussianParameters, ZigguratMagnitudeSampler, encode_modular, encode_signed},
 };
 
 /// Discrete Ziggurat sampler with signed output.
@@ -42,6 +42,20 @@ impl<T: FheInt + SignedInteger> SignedDiscreteZiggurat<T> {
     #[inline]
     pub(crate) fn maximum_magnitude(&self) -> u64 {
         self.maximum_magnitude
+    }
+
+    /// Uses the same magnitude tables with an already validated modulus.
+    #[inline]
+    pub(crate) fn sample_encoded<U: FheUint, R: rand::Rng + ?Sized>(
+        &self,
+        modulus_minus_one: U,
+        rng: &mut R,
+    ) -> U
+    where
+        T: SignedInteger<UnsignedInteger = U>,
+    {
+        let (positive, magnitude) = self.core.sample(rng);
+        encode_modular(positive, magnitude.cast_to_unsigned(), modulus_minus_one)
     }
 }
 

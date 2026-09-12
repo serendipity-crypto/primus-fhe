@@ -5,7 +5,7 @@ use std::{
 };
 
 use primus_distr::{
-    SecretKeyDistr, SignedSecretKeySampler, sample_crt_sparse_ternary_values_to,
+    SecretKeyDistr, SecretKeySampler, sample_crt_sparse_ternary_values_to,
     sample_fixed_hamming_weight_ternary_values_to, sample_sparse_ternary_values_to,
     sample_ternary_values_with_probabilities_to, sample_uniform_ternary_values_to,
 };
@@ -81,9 +81,8 @@ fn ternary_threshold_boundaries_and_public_validation() {
             &mut Words(words.clone().into_iter()),
         );
         assert_eq!(output, expected);
-        let sampler =
-            SignedSecretKeySampler::<i32>::new(SecretKeyDistr::ternary(negative, positive));
-        sampler.sample_to(&mut output, &mut Words(words.into_iter()));
+        let sampler = SecretKeySampler::<u32>::new(SecretKeyDistr::ternary(negative, positive));
+        sampler.sample_signed_to(&mut output, &mut Words(words.into_iter()));
         assert_eq!(output, expected);
     }
     for (negative, positive) in [(-0.5, 0.5), (0.5, -0.5), (f64::NAN, 0.0), (0.7, 0.4)] {

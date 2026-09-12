@@ -1,4 +1,4 @@
-use primus_distr::{DiscreteGaussian, EncodedSecretKeySampler};
+use primus_distr::{DiscreteGaussian, SecretKeySampler};
 use primus_integer::FheUint;
 use primus_reduce::RingContext;
 use rand::distr::Uniform;
@@ -23,7 +23,7 @@ where
     cipher_modulus_minus_one: T,
     cipher_modulus_uniform_distr: Uniform<T>,
     plaintext_codec: RoundedCodec<T>,
-    secret_key_sampler: EncodedSecretKeySampler<T>,
+    secret_key_sampler: SecretKeySampler<T>,
     /// The noise distribution.
     noise_distribution: DiscreteGaussian<T>,
 }
@@ -38,8 +38,9 @@ where
     /// # Panics
     ///
     /// Panics if `dimension` is zero or `dimension + 1` overflows `usize`,
-    /// secret-key probabilities are invalid, either Gaussian sampler fails the
-    /// validity rules of [`DiscreteGaussian::new`],
+    /// secret-key sampling violates [`SecretKeySampler::new`]'s validity rules,
+    /// its support does not fit below the ciphertext modulus, the noise sampler
+    /// violates [`DiscreteGaussian::new`]'s validity rules,
     /// or the plaintext/ciphertext moduli fail the rules of
     /// [`RoundedCodec::new`](primus_encoding::RoundedCodec::new).
     #[inline]
@@ -56,8 +57,11 @@ where
 
         let noise_distribution =
             DiscreteGaussian::new(noise_standard_deviation, cipher_modulus_minus_one).unwrap();
-        let secret_key_sampler =
-            EncodedSecretKeySampler::new(secret_key_distr, cipher_modulus_minus_one);
+        let secret_key_sampler = SecretKeySampler::new(secret_key_distr);
+        assert!(
+            secret_key_sampler.maximum_magnitude() <= cipher_modulus_minus_one,
+            "secret-key magnitude bound must be less than the ciphertext modulus"
+        );
 
         let cipher_modulus_uniform_distr = cipher_modulus.uniform_distribution();
         let plaintext_codec =
@@ -124,7 +128,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn secret_key_sampler(&self) -> &EncodedSecretKeySampler<T> {
+    pub(crate) fn secret_key_sampler(&self) -> &SecretKeySampler<T> {
         &self.secret_key_sampler
     }
 

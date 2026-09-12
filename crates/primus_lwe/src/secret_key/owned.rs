@@ -102,7 +102,11 @@ impl<T: FheUint> LweSecretKey<T> {
         M: RingContext<T>,
     {
         let distr = params.secret_key_distr();
-        let key = params.secret_key_sampler().sample(params.dimension(), rng);
+        let key = params.secret_key_sampler().sample_encoded(
+            params.dimension(),
+            params.cipher_modulus_minus_one(),
+            rng,
+        );
         Self { data: key, distr }
     }
 }

@@ -1,4 +1,4 @@
-use primus_glwe::{GlweCiphertext, NttGadgetDomain, NttGlweKeySwitchingContext};
+use primus_glwe::{GlweCiphertext, NttGlweKeySwitchingContext};
 use primus_integer::FheUint;
 use primus_lwe::LweCiphertext;
 use primus_ntt::NttTable;
@@ -17,8 +17,7 @@ where
 {
     context: &'a TfheContext<T, Table>,
     server_key: &'a ServerKey<T>,
-    key_switching_domain: NttGadgetDomain<'a, T, primus_modulus::BarrettModulus<T>, Table>,
-    bootstrapping_domain: NttGadgetDomain<'a, T, primus_modulus::BarrettModulus<T>, Table>,
+    // try_new binds the key, parameters and table; this workspace stays private.
     blind_rotation: NttGlweBlindRotationContext<T>,
     key_switching: NttGlweKeySwitchingContext<T>,
     main_glwe: GlweCiphertext<Vec<T>>,
@@ -73,16 +72,12 @@ where
             return Err(TfheEvaluationError::IncompatibleServerKey);
         }
 
-        let key_switching_domain = context.key_switching_domain();
-        let bootstrapping_domain = context.bootstrapping_domain();
         let key_switching_context =
-            NttGlweKeySwitchingContext::new(key_switching_domain.size().glwe_size());
+            NttGlweKeySwitchingContext::new(parameters.glwe_key_switching().output().glwe_size());
         Ok(Self {
             context,
             server_key,
-            key_switching_domain,
-            blind_rotation: NttGlweBlindRotationContext::new(bootstrapping_domain.size()),
-            bootstrapping_domain,
+            blind_rotation: NttGlweBlindRotationContext::new(parameters.bootstrapping().size()),
             key_switching: key_switching_context,
             main_glwe: GlweCiphertext::zero(parameters.glwe().glwe_len()),
             switched: GlweCiphertext::zero(parameters.glwe_key_switching().output().glwe_len()),
@@ -177,18 +172,20 @@ where
             PbsOrder::BootstrapKeyswitch => {
                 self.server_key
                     .bootstrapping_key()
-                    .ntt_blind_rotate_many_lookup_table_to(
+                    .ntt_blind_rotate_many_lookup_table_kernel_to(
                         input.as_lwe(),
                         lookup_table.polynomial(),
                         lookup_table.output_count(),
                         &mut self.main_glwe,
-                        &self.bootstrapping_domain,
+                        self.context.parameters().glwe().cipher_modulus(),
+                        self.context.table(),
                         &mut self.blind_rotation,
                     );
                 self.server_key.glwe_key_switching_key().key_switch_to(
                     &self.main_glwe,
                     &mut self.switched,
-                    &self.key_switching_domain,
+                    self.context.parameters().glwe().cipher_modulus(),
+                    self.context.table(),
                     &mut self.key_switching,
                 );
                 for (index, output) in outputs.iter_mut().enumerate() {
@@ -204,12 +201,13 @@ where
                 self.prepare_small_lwe(input);
                 self.server_key
                     .bootstrapping_key()
-                    .ntt_blind_rotate_many_lookup_table_to(
+                    .ntt_blind_rotate_many_lookup_table_kernel_to(
                         &self.small_lwe,
                         lookup_table.polynomial(),
                         lookup_table.output_count(),
                         &mut self.main_glwe,
-                        &self.bootstrapping_domain,
+                        self.context.parameters().glwe().cipher_modulus(),
+                        self.context.table(),
                         &mut self.blind_rotation,
                     );
                 for (index, output) in outputs.iter_mut().enumerate() {
@@ -233,17 +231,19 @@ where
         let glwe = self.context.parameters().glwe();
         self.server_key
             .bootstrapping_key()
-            .ntt_blind_rotate_lookup_table_to(
+            .ntt_blind_rotate_lookup_table_kernel_to(
                 input.as_lwe(),
                 lookup_table.polynomial(),
                 &mut self.main_glwe,
-                &self.bootstrapping_domain,
+                self.context.parameters().glwe().cipher_modulus(),
+                self.context.table(),
                 &mut self.blind_rotation,
             );
         self.server_key.glwe_key_switching_key().key_switch_to(
             &self.main_glwe,
             &mut self.switched,
-            &self.key_switching_domain,
+            self.context.parameters().glwe().cipher_modulus(),
+            self.context.table(),
             &mut self.key_switching,
         );
         self.switched.extract_compact_lwe_to(
@@ -263,11 +263,12 @@ where
         self.prepare_small_lwe(input);
         self.server_key
             .bootstrapping_key()
-            .ntt_blind_rotate_lookup_table_to(
+            .ntt_blind_rotate_lookup_table_kernel_to(
                 &self.small_lwe,
                 lookup_table.polynomial(),
                 &mut self.main_glwe,
-                &self.bootstrapping_domain,
+                self.context.parameters().glwe().cipher_modulus(),
+                self.context.table(),
                 &mut self.blind_rotation,
             );
         self.main_glwe.extract_lwe_to(
@@ -287,7 +288,8 @@ where
         self.server_key.glwe_key_switching_key().key_switch_to(
             &self.main_glwe,
             &mut self.switched,
-            &self.key_switching_domain,
+            self.context.parameters().glwe().cipher_modulus(),
+            self.context.table(),
             &mut self.key_switching,
         );
         self.switched.extract_compact_lwe_to(

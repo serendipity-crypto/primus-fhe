@@ -5,6 +5,25 @@ use primus_glwe_rns::{
 use primus_modulus::BarrettModulus;
 
 #[test]
+fn secret_support_must_fit_every_rns_modulus() {
+    let moduli = [97u64, 17].map(BarrettModulus::new);
+    for (sigma, valid) in [(1.0, true), (1.5, false)] {
+        let result = std::panic::catch_unwind(|| {
+            CrtGlweParameters::new(
+                1,
+                8,
+                BarrettModulus::new(3),
+                BarrettModulus::new(101),
+                &moduli,
+                SecretKeyDistr::gaussian(sigma),
+                0.7,
+            )
+        });
+        assert_eq!(result.is_ok(), valid);
+    }
+}
+
+#[test]
 fn gadget_basis_must_fit_every_rns_modulus() {
     // The restrictive modulus is deliberately not the first one.
     let moduli = [97u64, 17].map(BarrettModulus::new);

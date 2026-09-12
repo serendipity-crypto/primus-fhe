@@ -1,3 +1,4 @@
+use rand::{SeedableRng, rngs::StdRng};
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -23,7 +24,7 @@ fn bench_expand_coeff(c: &mut Criterion) {
     let moduli_values: [V; 2] = [1125899906826241, 1125899906629633];
     let moduli = moduli_values.map(BarrettModulus::new);
 
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
 
     let mut group = c.benchmark_group("expand_coeff");
     group.sample_size(10);
@@ -48,7 +49,11 @@ fn bench_expand_coeff(c: &mut Criterion) {
         let rns_glwe_len = glwe_params.rns_glwe_len();
         let base_q = glwe_params.base_q();
 
-        let sk = GlweSecretKey::generate(&glwe_params, &mut rng);
+        let sk = GlweSecretKey::generate(
+            glwe_params.size().glwe_size(),
+            glwe_params.secret_key_sampler(),
+            &mut rng,
+        );
         let dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&sk, &table);
 
         let glev_params = CrtGlevParameters::with_glwe_params(&glwe_params, 20, None);
@@ -89,7 +94,7 @@ fn bench_expand_coeff(c: &mut Criterion) {
         let n_label = format!("N={poly_length}");
 
         // ---- Single-threaded ----
-        group.bench_with_input(BenchmarkId::new("CRT/single", &n_label), &(), |b, _| {
+        group.bench_function(BenchmarkId::new("CRT/single", &n_label), |b| {
             b.iter(|| {
                 crt_expand_key.expand_coefficients_inplace(
                     black_box(&c_coeff),
@@ -100,7 +105,7 @@ fn bench_expand_coeff(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("DCRT/single", &n_label), &(), |b, _| {
+        group.bench_function(BenchmarkId::new("DCRT/single", &n_label), |b| {
             b.iter(|| {
                 dcrt_expand_key.expand_coefficients_inplace(
                     black_box(&c_ntt),
@@ -112,7 +117,7 @@ fn bench_expand_coeff(c: &mut Criterion) {
         });
 
         // ---- Multi-threaded ----
-        group.bench_with_input(BenchmarkId::new("CRT/parallel", &n_label), &(), |b, _| {
+        group.bench_function(BenchmarkId::new("CRT/parallel", &n_label), |b| {
             b.iter(|| {
                 crt_expand_key.expand_coefficients_inplace_parallel(
                     black_box(&c_coeff),
@@ -123,7 +128,7 @@ fn bench_expand_coeff(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("DCRT/parallel", &n_label), &(), |b, _| {
+        group.bench_function(BenchmarkId::new("DCRT/parallel", &n_label), |b| {
             b.iter(|| {
                 dcrt_expand_key.expand_coefficients_inplace_parallel(
                     black_box(&c_ntt),

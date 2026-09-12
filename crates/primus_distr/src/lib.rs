@@ -17,7 +17,7 @@
 //! [`SecretKeyDistr`] describes secret-coefficient distributions and validates
 //! probabilities and fixed weights. Cryptosystems select supported variants;
 //! Gaussian sampler constructors validate Gaussian parameters.
-//! [`EncodedSecretKeySampler`] and [`SignedSecretKeySampler`] prepare reusable
+//! [`SecretKeySampler`] prepares reusable
 //! whole-key sampling, including Gaussian tables and fixed-weight validation.
 //!
 //! # Sampler selection
@@ -26,7 +26,7 @@
 //! ([`CDTSampler`]) and a Ziggurat sampler ([`DiscreteZiggurat`]) based on
 //! whether the truncated support fits the CDT table.
 //! With the `high_precision` feature, portable 256-bit CDT samplers
-//! ([`PreciseCDTSampler`] and [`SignedPreciseCDTSampler`]) are also
+//! (`PreciseCDTSampler` and `SignedPreciseCDTSampler`) are also
 //! available.
 //!
 //! # Batch sampling
@@ -77,4 +77,4 @@ mod secret_key_distr;
 pub use secret_key_distr::SecretKeyDistr;
 
 mod secret_key_sampler;
-pub use secret_key_sampler::{EncodedSecretKeySampler, SecretKeySampler, SignedSecretKeySampler};
+pub use secret_key_sampler::SecretKeySampler;

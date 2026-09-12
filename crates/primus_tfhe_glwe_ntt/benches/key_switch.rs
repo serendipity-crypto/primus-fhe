@@ -1,11 +1,12 @@
+use rand::{SeedableRng, rngs::StdRng};
 // cargo bench -p primus_tfhe_glwe_ntt --bench key_switch
 
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use primus_glwe::{
-    GlweCiphertext, GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext,
-    NttGlweKeySwitchingContext, NttGlweKeySwitchingKey, NttGlweSecretKey,
+    GlweCiphertext, GlweSecretKey, NttGadgetEncryptContext, NttGlweKeySwitchingContext,
+    NttGlweKeySwitchingKey, NttGlweSecretKey,
 };
 use primus_lwe::{LweCiphertext, LweKeySwitchingKey, LweSecretKey, LweSecretKeyRef};
 use primus_ntt::{NttTable, U32NttTable};
@@ -18,11 +19,15 @@ fn bench_key_switch(c: &mut Criterion) {
     let input_glwe_dimension = parameters.glwe().dimension();
     let lwe_dimension = parameters.small_lwe().dimension();
     let table = U32NttTable::new(poly_length.trailing_zeros(), modulus).unwrap();
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
 
     let client_key = ClientKey::new(
         LweSecretKey::generate(parameters.small_lwe(), &mut rng),
-        GlweSecretKey::generate(parameters.glwe(), &mut rng),
+        GlweSecretKey::generate(
+            parameters.glwe().size(),
+            parameters.glwe().secret_key_sampler(),
+            &mut rng,
+        ),
         parameters.pbs_order(),
     );
     let lwe_secret_key = client_key.small_lwe_secret_key();
@@ -41,12 +46,13 @@ fn bench_key_switch(c: &mut Criterion) {
         NttGlweSecretKey::from_coeff_secret_key(&padded_glwe_secret_key, &table);
 
     let glwe_key_switching_parameters = parameters.glwe_key_switching();
-    let domain = NttGadgetDomain::try_new(glwe_key_switching_parameters.output(), &table).unwrap();
-    let mut gadget_context = NttGadgetEncryptContext::new(domain.size());
+    let mut gadget_context =
+        NttGadgetEncryptContext::new(glwe_key_switching_parameters.output().size());
     let glwe_key_switching_key = NttGlweKeySwitchingKey::generate(
         input_glwe_secret_key,
         &output_ntt_secret_key,
-        &domain,
+        glwe_key_switching_parameters.output(),
+        &table,
         &mut rng,
         &mut gadget_context,
     );
@@ -62,7 +68,8 @@ fn bench_key_switch(c: &mut Criterion) {
     let mut lwe_output = LweCiphertext::zero(lwe_dimension);
     let mut glwe_output: GlweCiphertext<Vec<u32>> =
         GlweCiphertext::zero(glwe_key_switching_parameters.output().glwe_len());
-    let mut glwe_context = NttGlweKeySwitchingContext::new(domain.size().glwe_size());
+    let mut glwe_context =
+        NttGlweKeySwitchingContext::new(glwe_key_switching_parameters.output().size().glwe_size());
 
     let mut group = c.benchmark_group(format!(
         "tfhe_key_switch/ntt/u32/n{poly_length}/k{input_glwe_dimension}/lwe{lwe_dimension}"
@@ -83,7 +90,8 @@ fn bench_key_switch(c: &mut Criterion) {
             glwe_key_switching_key.key_switch_to(
                 black_box(&input),
                 black_box(&mut glwe_output),
-                &domain,
+                modulus,
+                &table,
                 &mut glwe_context,
             );
             black_box(&glwe_output);

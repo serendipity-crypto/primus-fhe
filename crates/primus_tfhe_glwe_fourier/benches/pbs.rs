@@ -1,3 +1,4 @@
+use rand::{SeedableRng, rngs::StdRng};
 // cargo bench -p primus_tfhe_glwe_fourier --bench pbs
 
 use std::hint::black_box;
@@ -58,7 +59,7 @@ fn order_name(order: PbsOrder) -> &'static str {
 fn bench_order(c: &mut Criterion, order: PbsOrder) {
     let table = RustFftTable::new(POLY_LENGTH.trailing_zeros()).unwrap();
     let context = TfheContext::try_new(parameters(order), table).unwrap();
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     let (client_key, server_key) = context.generate_keys(&mut rng).unwrap();
     let parameters = context.parameters();
     let encryptor = context.encryptor(&client_key).unwrap();
@@ -102,7 +103,6 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
     server_key.glwe_key_switching_key().key_switch_to(
         &main_glwe,
         &mut switched,
-        key_switching_parameters,
         &mut fft,
         &mut key_switching,
     );
@@ -142,7 +142,6 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
             server_key.glwe_key_switching_key().key_switch_to(
                 black_box(&main_glwe),
                 black_box(&mut switched),
-                key_switching_parameters,
                 &mut fft,
                 &mut key_switching,
             );
@@ -196,14 +195,8 @@ fn bench_order(c: &mut Criterion, order: PbsOrder) {
             black_box(evaluator.apply_lookup_table(black_box(&input), black_box(&lookup_table)));
         });
     });
-    for gate in [
-        BooleanGate::And,
-        BooleanGate::Nand,
-        BooleanGate::Or,
-        BooleanGate::Nor,
-        BooleanGate::Xor,
-        BooleanGate::Xnor,
-    ] {
+    // One representative per binary input path: add, and subtract-then-double.
+    for gate in [BooleanGate::And, BooleanGate::Xor] {
         group.bench_function(format!("boolean_{gate:?}").to_lowercase(), |b| {
             b.iter(|| {
                 boolean_evaluator.evaluate_binary_to(

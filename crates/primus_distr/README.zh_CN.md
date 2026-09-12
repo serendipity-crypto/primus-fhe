@@ -49,19 +49,22 @@ Gaussian 参数由所选 Gaussian sampler 的构造器检查。
 构造时拒绝超过完整逻辑私钥长度的重量及重量和溢出。
 长度不保存在枚举中，且仍可直接构造枚举变体，因此采样入口继续校验实际输出长度。
 
-`EncodedSecretKeySampler<T>::new(distribution, modulus_minus_one)` 和
-`SignedSecretKeySampler<S>::new(distribution)` 准备完整私钥的采样操作，
-持有与分布匹配的 Gaussian 表及 binary/ternary 概率阈值，并提供 `distr()`、`sample(length, rng)`
-和 `sample_to(output, rng)`。后者无分配地覆盖调用方存储。固定重量作用于完整输出，
-非法输出长度在写入或采样前拒绝。这两个完整私钥采样器不实现标量 `Distribution`，
-因为固定重量会关联不同系数。LWE/NTRU 参数持有采样器以复用预计算；GLWE 系数私钥生成
-根据分布描述准备采样器。
+`SecretKeySampler<T>::new(distribution)` 为两种输出表示准备同一份 Gaussian 表及
+binary/ternary 概率阈值。`T` 是无符号类型，signed 输出使用 `T::SignedInteger`。
+`sample_signed(length, rng)` / `sample_signed_to(output, rng)` 生成 signed 私钥；
+`sample_encoded(length, modulus_minus_one, rng)` /
+`sample_encoded_to(output, modulus_minus_one, rng)` 生成规范模数表示。
+`_to` 方法无分配地覆盖调用方存储。固定重量作用于完整输出，非法长度在写入或采样前拒绝。
+完整私钥采样器不实现标量 `Distribution`，因为固定重量会关联不同系数。
 
-`SignedSecretKeySampler::maximum_magnitude()` 返回样本幅度的无符号上界（包含端点）。
-参数层可在使用有界 Signed 编码前，一次性验证它小于目标模数。
-Gaussian 使用截断支持上界；binary 和 ternary 保守返回一。
+`maximum_magnitude()` 返回样本幅度的无符号上界（包含端点）。构造时要求 Gaussian
+支持集可由对应的 signed 类型表示；binary 和 ternary 保守返回一。
+encoded 采样要求 `modulus_minus_one >= maximum_magnitude()`，其中 `T::MAX` 表示
+native 模数。这是调用方契约，由 LWE、GLWE、RNS GLWE 和 NTRU 参数构造器一次性检查，
+不在每批采样时重复检查。参数持有 sampler 以复用预计算。
+
 底层 `SignedDiscreteGaussian::maximum_magnitude()` 也保留显式后端的自定义 tail cut。
-两个采样器均不保存密文模数。
+共享私钥 sampler 和 signed Gaussian sampler 均不保存密文模数。
 
 自定义概率和固定重量的 binary/ternary 向量 helper 也提供 `_to` 版本。
 Encoded 采样器直接生成模数表示，不先分配 Signed 向量。

@@ -2,20 +2,22 @@
 
 use primus_data::{Data, DataMut};
 use primus_decompose::primitive::ApproxSignedBasis;
+use primus_factor::ShoupFactor;
 use primus_integer::FheUint;
 use primus_lattice::{GlweSize, glwe::Glwe};
 use primus_ntt::NttTable;
 use primus_reduce::FieldContext;
 
 use crate::{
-    GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext, NttGlweAutomorphismContext,
+    GlevParameters, GlweSecretKey, NttGadgetEncryptContext, NttGlweAutomorphismContext,
     NttGlweAutomorphismKey, NttGlweSecretKey,
 };
 
 /// Reusable workspace for homomorphic GLWE trace evaluation.
 pub struct NttGlweTraceContext<T: FheUint> {
-    automorphism_output: Glwe<Vec<T>>,
-    automorphism: NttGlweAutomorphismContext<T>,
+    // All buffers share one immutable GLWE layout, checked via the nested context.
+    pub(super) automorphism_output: Glwe<Vec<T>>,
+    pub(super) automorphism: NttGlweAutomorphismContext<T>,
 }
 
 impl<T: FheUint> NttGlweTraceContext<T> {
@@ -28,20 +30,31 @@ impl<T: FheUint> NttGlweTraceContext<T> {
     }
 }
 
-/// The `log2(N)` automorphism keys evaluating the full ring trace.
+/// The `log2(N)` automorphism keys shared by trace, coefficient projection
+/// and related-key packing. Inputs and outputs remain in coefficient form.
 #[derive(Clone)]
 pub struct NttGlweTraceKey<T: FheUint> {
-    automorphism_keys: Vec<NttGlweAutomorphismKey<T>>,
-    glwe_size: GlweSize,
+    pub(super) automorphism_keys: Vec<NttGlweAutomorphismKey<T>>,
+    pub(super) glwe_size: GlweSize,
+    pub(super) inverse_two: T,
+    // Entry j is the Shoup factor for 1 / 2^j, including full expansion at log2(N).
+    pub(super) inverse_expansion_lengths: Vec<ShoupFactor<T>>,
 }
 
 impl<T: FheUint> NttGlweTraceKey<T> {
     /// Generates the automorphism keys for degrees `N + 1, N/2 + 1, ...,
     /// 3`.
+    ///
+    /// Inherits [`NttGlweAutomorphismKey::generate`]'s correctness and panic conditions.
+    ///
+    /// # Panics
+    /// Panics if the ciphertext modulus is not below `2^(T::BITS - 1)`,
+    /// as required by the precomputed [`ShoupFactor`] for normalization.
     pub fn generate<M, Table, R>(
         secret_key: &GlweSecretKey<T>,
         ntt_secret_key: &NttGlweSecretKey<T>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        params: &GlevParameters<T, M>,
+        ntt: &Table,
         rng: &mut R,
         context: &mut NttGadgetEncryptContext<T>,
     ) -> Self
@@ -50,25 +63,47 @@ impl<T: FheUint> NttGlweTraceKey<T> {
         Table: NttTable<ValueT = T>,
         R: rand::Rng + rand::CryptoRng,
     {
+        ntt_secret_key.assert_gadget_compatible(params, ntt);
+        context.assert_glev_compatible(params.size());
         let glwe_size = secret_key.glwe_size();
+        assert_eq!(
+            glwe_size,
+            params.glwe_size(),
+            "trace secret key layout mismatch"
+        );
+        let modulus = params.cipher_modulus();
+        assert!(
+            modulus.value() < (T::ONE << (T::BITS - 1)),
+            "trace normalization requires modulus below 2^(T::BITS - 1)"
+        );
         let log_n = glwe_size.poly_length().trailing_zeros();
         let automorphism_keys = (1..=log_n)
             .rev()
             .map(|shift| (1usize << shift) + 1)
             .map(|degree| {
-                NttGlweAutomorphismKey::generate(
+                NttGlweAutomorphismKey::generate_kernel(
                     degree,
                     secret_key,
                     ntt_secret_key,
-                    domain,
+                    params,
+                    ntt,
                     rng,
                     context,
                 )
             })
             .collect();
+        let inverse_two = (modulus.value() >> 1u32) + T::ONE;
+        let mut inverse = T::ONE;
+        let mut inverse_expansion_lengths = Vec::with_capacity(log_n as usize + 1);
+        for _ in 0..=log_n {
+            inverse_expansion_lengths.push(ShoupFactor::new(inverse, modulus.value()));
+            inverse = (inverse >> 1u32) + (inverse & T::ONE) * inverse_two;
+        }
         Self {
+            inverse_expansion_lengths,
             automorphism_keys,
             glwe_size,
+            inverse_two,
         }
     }
 
@@ -86,11 +121,24 @@ impl<T: FheUint> NttGlweTraceKey<T> {
 
     /// Evaluates the full trace and overwrites `output` with an encryption of
     /// `N` times the constant coefficient of the input phase.
+    ///
+    /// Uses the layout and decomposition basis stored in this key.
+    ///
+    /// # Correctness
+    ///
+    /// Input coefficients must be canonical modulo `modulus`. The NTT table
+    /// must use the transform representation used to generate this key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if input/output or workspace layouts, the modulus, or the NTT
+    /// length/modulus do not match the key. Checks precede output writes.
     pub fn apply_to<M, Table, A, B>(
         &self,
         input: &Glwe<A>,
         output: &mut Glwe<B>,
-        domain: &NttGadgetDomain<'_, T, M, Table>,
+        modulus: M,
+        ntt: &Table,
         context: &mut NttGlweTraceContext<T>,
     ) where
         M: FieldContext<T>,
@@ -98,41 +146,12 @@ impl<T: FheUint> NttGlweTraceKey<T> {
         A: Data<Elem = T>,
         B: DataMut<Elem = T>,
     {
-        assert_eq!(
-            input.as_ref().len(),
-            self.glwe_size.glwe_len(),
-            "trace input layout mismatch"
-        );
-        assert_eq!(
-            output.as_ref().len(),
-            self.glwe_size.glwe_len(),
-            "trace output layout mismatch"
-        );
-        assert_eq!(
-            context.automorphism_output.as_ref().len(),
-            self.glwe_size.glwe_len(),
-            "trace workspace layout mismatch"
-        );
-        self.first_automorphism_key()
-            .assert_compatible(domain, &context.automorphism);
-
-        output.as_mut().copy_from_slice(input.as_ref());
-        let modulus = domain.parameters().cipher_modulus();
-
-        for key in &self.automorphism_keys {
-            key.apply_kernel_to(
-                output,
-                &mut context.automorphism_output,
-                domain,
-                &mut context.automorphism,
-            );
-            output.add_assign(&context.automorphism_output, modulus);
-        }
+        self.apply_partial_to(input, 1, output, modulus, ntt, context);
     }
 
     /// Returns the first key, which exists because supported GLWE polynomial
     /// lengths are at least two.
-    fn first_automorphism_key(&self) -> &NttGlweAutomorphismKey<T> {
+    pub(super) fn first_automorphism_key(&self) -> &NttGlweAutomorphismKey<T> {
         self.automorphism_keys
             .first()
             .expect("a trace key must contain at least one automorphism key")

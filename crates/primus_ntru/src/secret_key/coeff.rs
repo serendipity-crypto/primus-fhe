@@ -116,7 +116,7 @@ impl<T: FheUint> NtruSecretKey<T> {
     {
         let poly_length = params.poly_length();
         let distr = params.secret_key_distr();
-        let key = params.secret_key_sampler().sample(poly_length, rng);
+        let key = params.secret_key_sampler().sample_signed(poly_length, rng);
         Self { key, distr }
     }
 }

@@ -1,7 +1,7 @@
 //! RNS (Residue Number System) multi-modulus GLWE / GLev / GGSW parameters.
 
 use primus_decompose::big_integer::BigUintApproxSignedBasis;
-use primus_distr::SignedDiscreteGaussian;
+use primus_distr::{SecretKeySampler, SignedDiscreteGaussian};
 use primus_factor::ShoupFactor;
 use primus_integer::{BigUint, FheUint, UnsignedInteger};
 use primus_lattice::{GlweSize, RnsGadgetSize, RnsGlweSize};
@@ -30,9 +30,7 @@ where
     /// BFV-style RNS codec for encoding/decoding plaintext.
     codec: BfvRnsCodec<T, M>,
     delta_mod_q: Vec<T>,
-    /// The distribution type of the secret key.
-    secret_key_distr: SecretKeyDistr,
-    secret_key_distribution: Option<SignedDiscreteGaussian<<T as UnsignedInteger>::SignedInteger>>,
+    secret_key_sampler: SecretKeySampler<T>,
     /// The noise distribution
     noise_distribution: SignedDiscreteGaussian<<T as UnsignedInteger>::SignedInteger>,
 }
@@ -43,6 +41,8 @@ where
     M: FieldContext<T>,
 {
     /// Creates a new [`CrtGlweParameters<T, M>`].
+    /// Secret-key sampling must satisfy [`SecretKeySampler::new`]'s validity
+    /// rules and its support must fit below every ciphertext modulus.
     pub fn new(
         dimension: usize,
         poly_length: usize,
@@ -80,12 +80,13 @@ where
 
         let size = RnsGlweSize::new(GlweSize::new(dimension, poly_length), cipher_moduli.len());
 
-        let secret_key_distribution =
-            if let SecretKeyDistr::Gaussian { standard_deviation } = secret_key_distr {
-                SignedDiscreteGaussian::new(standard_deviation).ok()
-            } else {
-                None
-            };
+        let secret_key_sampler = SecretKeySampler::new(secret_key_distr);
+        assert!(
+            cipher_moduli_value
+                .iter()
+                .all(|&q| secret_key_sampler.maximum_magnitude() < q),
+            "secret-key magnitude bound must be less than every ciphertext modulus"
+        );
 
         Self {
             size,
@@ -94,8 +95,7 @@ where
             cipher_moduli_uniform_distr,
             codec,
             delta_mod_q,
-            secret_key_distr,
-            secret_key_distribution,
+            secret_key_sampler,
             noise_distribution,
         }
     }
@@ -161,14 +161,14 @@ where
 
     /// Returns the secret key type of this [`CrtGlweParameters<T, M>`].
     pub fn secret_key_distr(&self) -> SecretKeyDistr {
-        self.secret_key_distr
+        self.secret_key_sampler.distr()
     }
 
-    /// Returns the secret key distribution of this [`CrtGlweParameters<T, M>`].
-    pub fn secret_key_distribution(
-        &self,
-    ) -> Option<&SignedDiscreteGaussian<<T as UnsignedInteger>::SignedInteger>> {
-        self.secret_key_distribution.as_ref()
+    /// Returns shared precomputation for coefficient secret-key generation.
+    #[must_use]
+    #[inline]
+    pub fn secret_key_sampler(&self) -> &SecretKeySampler<T> {
+        &self.secret_key_sampler
     }
 
     /// Returns a reference to the noise distribution of this [`CrtGlweParameters<T, M>`].
@@ -333,7 +333,7 @@ where
             cipher_moduli_value: glwe_params.cipher_moduli_value().to_vec(),
             cipher_moduli_minus_one: glwe_params.cipher_moduli_minus_one().to_vec(),
             cipher_moduli_uniform_distr: glwe_params.cipher_moduli_uniform_distr().to_vec(),
-            secret_key_distr: glwe_params.secret_key_distr,
+            secret_key_distr: glwe_params.secret_key_distr(),
             noise_distribution: glwe_params.noise_distribution().clone(),
             basis,
             scalar_residues,

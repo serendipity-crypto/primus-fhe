@@ -1,16 +1,16 @@
-//! Patched NTT circuit bootstrapping using PBSManyLUT, HomTrace, and scheme
+//! Patched NTT circuit bootstrapping using PBSManyLUT, reverse-trace projection, and scheme
 //! switching.
 
 use primus_data::DataMut;
 use primus_glwe::{
-    GlevCiphertext, GlweCiphertext, NttGadgetDomain, NttGlweKeySwitchingContext,
-    NttGlweSchemeSwitchContext, NttGlweTraceContext,
+    GlevCiphertext, GlweCiphertext, NttGlweKeySwitchingContext, NttGlweSchemeSwitchContext,
+    NttGlweTraceContext,
 };
 use primus_integer::FheUint;
 use primus_lattice::ggsw::NttGgsw;
 use primus_lwe::LweCiphertext;
 use primus_ntt::NttTable;
-use primus_reduce::{Modulus, ReduceInv, ReduceMul};
+use primus_reduce::{Modulus, ReduceMul};
 use primus_tfhe::{Ciphertext, LookupTableError, ManyLookupTable};
 use primus_tfhe_glwe::GlwePbsOrder as PbsOrder;
 
@@ -28,7 +28,7 @@ pub enum CircuitBootstrapEvaluationError {
     /// The circuit parameters belong to a different TFHE accumulator.
     #[error("circuit-bootstrap parameters are incompatible with the TFHE context")]
     IncompatibleParameters,
-    /// The HomTrace or scheme-switching key has another layout.
+    /// The trace-projection or scheme-switching key has another layout.
     #[error("circuit-bootstrap key is incompatible with its parameters")]
     IncompatibleCircuitBootstrapKey,
     /// The circuit-bootstrap PBSManyLUT could not be compiled.
@@ -50,11 +50,8 @@ where
     parameters: &'a CircuitBootstrapParameters<T>,
     circuit_key: &'a CircuitBootstrapKey<T>,
     lookup_table: ManyLookupTable<T>,
-    inverse_poly_length: T,
-    key_switching_domain: NttGadgetDomain<'a, T, primus_modulus::BarrettModulus<T>, Table>,
-    bootstrapping_domain: NttGadgetDomain<'a, T, primus_modulus::BarrettModulus<T>, Table>,
-    trace_domain: NttGadgetDomain<'a, T, primus_modulus::BarrettModulus<T>, Table>,
-    scheme_switch_domain: NttGadgetDomain<'a, T, primus_modulus::BarrettModulus<T>, Table>,
+    projection_indices: Vec<usize>,
+    // try_new binds the key, parameters and table; this workspace stays private.
     blind_rotation: NttGlweBlindRotationContext<T>,
     key_switching: NttGlweKeySwitchingContext<T>,
     trace: NttGlweTraceContext<T>,
@@ -62,7 +59,6 @@ where
     main_glwe: GlweCiphertext<Vec<T>>,
     switched: GlweCiphertext<Vec<T>>,
     small_lwe: LweCiphertext<T>,
-    refreshed: GlevCiphertext<Vec<T>>,
     traced: GlevCiphertext<Vec<T>>,
 }
 
@@ -113,17 +109,7 @@ where
             },
         )?;
 
-        let poly_length_value = T::try_from(poly_length)
-            .expect("validated NTT polynomial length must fit the coefficient type");
-        let inverse_poly_length = modulus.reduce_inv(poly_length_value);
-        let key_switching_domain = context.key_switching_domain();
-        let key_switching_glwe_size = key_switching_domain.size().glwe_size();
-        let bootstrapping_domain = context.bootstrapping_domain();
-        let trace_domain = NttGadgetDomain::try_new(parameters.trace(), context.table())
-            .expect("validated circuit-bootstrap trace domain must match the NTT table");
-        let scheme_switch_domain =
-            NttGadgetDomain::try_new(parameters.scheme_switch(), context.table())
-                .expect("validated scheme-switch domain must match the NTT table");
+        let key_switching_glwe_size = tfhe.glwe_key_switching().output().glwe_size();
         let glwe_size = glwe.size();
 
         Ok(Self {
@@ -132,19 +118,14 @@ where
             parameters,
             circuit_key,
             lookup_table,
-            inverse_poly_length,
-            key_switching_domain,
-            blind_rotation: NttGlweBlindRotationContext::new(bootstrapping_domain.size()),
-            bootstrapping_domain,
+            projection_indices: (0..parameters.output().glev_len() / glwe.glwe_len()).collect(),
+            blind_rotation: NttGlweBlindRotationContext::new(tfhe.bootstrapping().size()),
             key_switching: NttGlweKeySwitchingContext::new(key_switching_glwe_size),
             trace: NttGlweTraceContext::new(glwe_size),
-            scheme_switch: NttGlweSchemeSwitchContext::new(scheme_switch_domain.size()),
-            trace_domain,
-            scheme_switch_domain,
+            scheme_switch: NttGlweSchemeSwitchContext::new(parameters.scheme_switch().size()),
             main_glwe: GlweCiphertext::zero(glwe.glwe_len()),
             switched: GlweCiphertext::zero(tfhe.glwe_key_switching().output().glwe_len()),
             small_lwe: LweCiphertext::zero(tfhe.small_lwe().dimension()),
-            refreshed: GlevCiphertext::zero(parameters.output().glev_len()),
             traced: GlevCiphertext::zero(parameters.output().glev_len()),
         })
     }
@@ -183,46 +164,29 @@ where
         };
         self.server_key
             .bootstrapping_key()
-            .ntt_blind_rotate_many_lookup_table_to(
+            .ntt_blind_rotate_many_lookup_table_kernel_to(
                 small_lwe,
                 self.lookup_table.polynomial(),
                 self.lookup_table.output_count(),
                 &mut self.main_glwe,
-                &self.bootstrapping_domain,
+                self.context.parameters().glwe().cipher_modulus(),
+                self.context.table(),
                 &mut self.blind_rotation,
             );
 
-        let glwe = tfhe.glwe();
-        let poly_length = glwe.poly_length();
-        let two_n = 2 * poly_length;
-        for (index, mut level) in self.refreshed.iter_glwe_mut(glwe.glwe_len()).enumerate() {
-            let exponent = index.wrapping_neg() & (two_n - 1);
-            self.main_glwe.mul_monomial_to(
-                exponent,
-                &mut level,
-                poly_length,
-                glwe.cipher_modulus(),
-            );
-        }
-
-        self.refreshed
-            .mul_scalar_assign(self.inverse_poly_length, glwe.cipher_modulus());
-        for (refreshed, mut traced) in self
-            .refreshed
-            .iter_glwe(glwe.glwe_len())
-            .zip(self.traced.iter_glwe_mut(glwe.glwe_len()))
-        {
-            self.circuit_key.trace_key().apply_to(
-                &refreshed,
-                &mut traced,
-                &self.trace_domain,
-                &mut self.trace,
-            );
-        }
+        self.circuit_key.trace_key().project_coefficients_to(
+            &self.main_glwe,
+            &self.projection_indices,
+            self.traced.as_mut(),
+            self.context.parameters().glwe().cipher_modulus(),
+            self.context.table(),
+            &mut self.trace,
+        );
         self.circuit_key.scheme_switch_key().apply_to(
             &self.traced,
             output,
-            &self.scheme_switch_domain,
+            self.context.parameters().glwe().cipher_modulus(),
+            self.context.table(),
             &mut self.scheme_switch,
         );
     }
@@ -238,7 +202,8 @@ where
         self.server_key.glwe_key_switching_key().key_switch_to(
             &self.main_glwe,
             &mut self.switched,
-            &self.key_switching_domain,
+            self.context.parameters().glwe().cipher_modulus(),
+            self.context.table(),
             &mut self.key_switching,
         );
         self.switched.extract_compact_lwe_to(

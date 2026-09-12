@@ -2,10 +2,11 @@
 
 mod coeff;
 mod fourier;
-mod gadget;
 mod ntt;
 
-pub use coeff::{GlweSecretKey, GlweSecretKeyParameterSet};
-pub use fourier::{FourierGlweDecryptContext, FourierGlweEncryptContext, FourierGlweSecretKey};
-pub use gadget::{FourierGadgetEncryptContext, NttGadgetEncryptContext};
-pub use ntt::NttGlweSecretKey;
+pub use coeff::GlweSecretKey;
+pub use fourier::{
+    FourierGadgetEncryptContext, FourierGlweDecryptContext, FourierGlweEncryptContext,
+    FourierGlweSecretKey,
+};
+pub use ntt::{NttGadgetEncryptContext, NttGlweSecretKey};

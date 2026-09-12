@@ -1,0 +1,105 @@
+# primus_glwe
+
+[English](README.md) | [简体中文](README.zh_CN.md)
+
+Single-modulus GLWE keys and operations, with separate NTT and native-torus Fourier representations. Here `k` is the GLWE dimension and `N` the polynomial length.
+
+## Keys and representation
+
+| Type | Storage and role |
+| --- | --- |
+| `GlweSecretKey<T>` | Signed coefficient polynomials; sampling and input to key conversion/generation |
+| `NttGlweSecretKey<T>` | Canonical NTT residues modulo `q`; NTT encryption and decryption |
+| `FourierGlweSecretKey` | Integer-scaled Fourier secret polynomials; native-torus Fourier encryption and decryption |
+| `NttGlwePublicKey<S>` | One NTT encryption of zero; public-key encryption |
+
+Use `generate` for randomized generation. Keys do not store transform tables: preserve the modulus and transform representation used at generation. Raw public-key bytes use native endianness and contain no parameter metadata.
+
+## Encryption and decryption
+
+NTT secret, Fourier secret and NTT public keys share these ordinary encryption methods:
+
+| Method | Input | Output storage |
+| --- | --- | --- |
+| `encrypt` / `encrypt_to` | Plaintext in `[0, t)`, unsigned embedding | Allocate / overwrite |
+| `encrypt_centered_to` | Plaintext in `[0, t)`, centered embedding | Overwrite |
+| `encrypt_encoded_to` | Already encoded ciphertext-ring coefficients | Overwrite; no plaintext scaling |
+| `encrypt_zeros` / `encrypt_zeros_to` | Zero polynomial | Allocate / overwrite |
+
+Secret keys provide `decrypt`, `decrypt_to` and `phase_to`. Phase extraction returns noisy coefficient-domain values without decoding; both plaintext embeddings use the same decoder. Decryption returns the message's unsigned integer type.
+
+```text
+ntt_sk.encrypt_to(input, output, params, ntt_table, rng)
+ntt_pk.encrypt_to(input, output, params, ntt_table, rng, context)
+fourier_sk.encrypt_to(input, output, params, fft, rng, context)
+ntt_sk.phase_to(input, output, modulus, ntt_table)
+fourier_sk.phase_to(input, output, fft, context)
+```
+
+NTT secret-key ordinary operations need no context. Fourier operations use `FourierGlweEncryptContext<T>` / `FourierGlweDecryptContext`; NTT public encryption uses `NttGlwePublicEncryptContext<T>`. Construct these with `N` and reuse them at that length. Contexts hold scratch, not parameters, and erase secret intermediates on drop.
+
+`_to` paths reuse output and scratch. Layout/transform mismatches fail before output writes. Invalid plaintext values may panic after partial writes or randomness consumption. Encoded NTT inputs must be canonical residues in `[0, q)`; callers guarantee this range.
+
+## Gadget and truncated ciphertexts
+
+`encrypt_glev_to` and `encrypt_ggsw_to` apply the gadget basis to a coefficient-domain ring polynomial without plaintext scaling. A GGSW control bit is therefore the constant polynomial `0` or `1`. Both use a gadget context constructed from `GadgetSize`: GLev requires a matching polynomial length; GGSW also requires a matching level count.
+
+`encrypt_ggsw_constant_batch_to` encrypts canonical constants into consecutive NTT GGSWs, with one batch validation and no temporary allocation. Output length is `input.len() * params.ggsw_len()`.
+
+NTT `encrypt_truncated_zeros`, `phase_truncated` and `decrypt_truncated` operate on coefficient ciphertexts with a full mask and at most `N` body coefficients. Phase extraction and decryption return only the retained coefficients, while their internal scratch still holds full polynomials.
+
+## Evaluation primitives
+
+Evaluation keys own their layouts and decomposition bases. NTT evaluation takes `input, output, modulus, ntt, context`; Fourier evaluation omits `modulus`. Contexts are reusable workspaces. Preserve the key's transform representation: matching lengths and moduli alone do not prove compatibility.
+
+Both automorphism keys provide coefficient-domain `apply_to`. `NttGlweAutomorphismKey::apply_ntt_to` and `FourierGlweAutomorphismKey::apply_fourier_to` reuse the same key for transform-domain input/output. Fourier evaluation requires the exact FFT table instance used at key generation; direct Fourier input/output can round differently from a coefficient roundtrip.
+
+`NttGlweTraceKey<T>` and `FourierGlweTraceKey<T>` share their automorphism material across the following coefficient-domain operations. `M` denotes the input message; every output phase coefficient may contain evaluation error.
+
+| Trace-key method | Target message |
+| --- | --- |
+| `apply_to` / `apply_reverse_to` | Constant `N*M[0]` / `M[0]` |
+| `apply_partial_to(input, r, ...)` | `d * sum_j M[j*d] X^(j*d)`, where `d=N/r` |
+| `apply_reverse_partial_to(input, r, ...)` | `sum_j M[j*d] X^(j*d)` |
+| `project_coefficient_to` / `project_coefficients_to` | Constant `M[index]` / constants in selection order |
+| `expand_coefficients_to` | `N` constant GLWEs in coefficient order |
+| `expand_partial_coefficients_to(input, count, ...)` | First `count` constants, assuming a zero message tail |
+| `pack_lwe_to` / `pack_lwes_to` | Constant LWE message / `sum_i m[i] X^(i*N/p)` for `p` LWEs |
+
+Partial trace's `retained_coefficient_count` (`r`) is a power of two in `1..=N`. It retains equally spaced positions in one GLWE: `N=8, r=2` retains indices 0 and 4. `r=N` copies the input; `r=1` is full trace. Reverse trace scales before each automorphism/addition: NTT multiplies by `2^-1 mod q`; Fourier uses unsigned coefficient `floor(x/2)`. The NTT field operation does not inherit the torus RevHomTrace noise bound.
+
+Projection accepts arbitrary indices, including duplicates and an empty selection. It uses one reverse trace per index and writes `indices.len() * size.glwe_len()` values. Partial expansion instead builds a shared tree in `count` output GLWE blocks, using `count-1` automorphisms after normalizing once by `count`. `count` must be a power of two in `1..=N`; `count=1` copies the input and `count=N` is full expansion. NTT normalization uses the field inverse; Fourier uses unsigned floor division. These paths have different error behavior.
+
+For partial expansion to produce constants, message coefficients `count..N` must be zero. This unchecked premise concerns the message, not ciphertext masks or bodies. Otherwise output `i` targets `sum_j M[i+j*count] X^(j*count)`. All outputs retain ring degree `N` and use the ordinary trace context.
+
+Packing uses the [RevHomTrace algorithm](https://github.com/Stirling75/RevHomTrace/blob/main/src/glwe_conv_rev.rs). Each LWE must have dimension `k*N`, the flattened GLWE secret, and the same modulus and encoding. A batch is a flat slice of `p` complete LWEs, where `p` is a power of two in `1..=N`; slots are adjacent only at `p=N`. Construct `NttGlwePackingContext::new(size, p)` or `FourierGlwePackingContext::new(size, p)` for that fixed count. Single-LWE packing uses a trace context. Evaluation reuses output and scratch, checking shapes, indices and backend compatibility before writes.
+
+## Source and tests
+
+[Secret keys](src/secret_key), [public keys](src/public_key), [key switching](src/key_switch), [automorphism](src/automorphism), [trace/packing](src/trace) and [scheme switching](src/scheme_switch.rs) contain the public contracts and implementation details.
+
+Tests are grouped by operation: ordinary key workflows, gadget phases and external products, CMUX, key switching, automorphism, scheme switching, and trace/expansion/packing. `tests/common` holds the small schoolbook phase oracle shared by automorphism and trace tests. Boundary rejection and capacity zeroization have dedicated test binaries. Fourier automorphism and trace/packing tests exercise both RustFFT and tfhe-fft.
+
+```sh
+cargo test -p primus_glwe
+cargo clippy -p primus_glwe --all-targets -- -D warnings
+cargo +nightly test -p primus_glwe --features simd
+```
+
+## Benchmarks
+
+```sh
+cargo bench -p primus_glwe --bench encryption
+cargo bench -p primus_glwe --bench primitives
+# Check every case without collecting timing samples:
+cargo bench -p primus_glwe -- --test
+```
+
+Both benches use `(k, N) = (1, 1024)` and `(2, 4096)`. Each iteration performs one operation with reusable output/scratch; key/table construction and allocation remain outside timing. Parameters and fixed seeds are recorded in the bench sources. These workloads track regressions rather than compare matched security; they are not security parameter recommendations.
+
+| Bench | Work measured |
+| --- | --- |
+| [encryption](benches/encryption.rs) | Secret/public encryption, secret decryption, GLev/GGSW generation; includes sampling, coding and required transforms |
+| [primitives](benches/primitives.rs) | Ordinary/reverse trace; projection and partial expansion for 8 and `N/8` coefficients; full expansion; packing 1, 8 and `N` LWEs; direct Fourier automorphism on both FFT backends |
+
+Ordinary and reverse trace measure their respective API scales. Projection/partial expansion use the same encrypted zero-tail message and report output-message throughput. Codec variants are benchmarked in `primus_encoding`.

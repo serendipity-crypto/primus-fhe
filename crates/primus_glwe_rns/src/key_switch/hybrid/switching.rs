@@ -367,8 +367,16 @@ mod tests {
         let hybrid = HybridRNS::new(&q_moduli, &p_moduli, 2).unwrap();
         let domain = HybridRnsKeySwitchDomain::try_new(&hybrid, &qp_table).unwrap();
         let mut rng = StdRng::seed_from_u64(0x4859_4252_4944);
-        let input_key = GlweSecretKey::generate(&parameters, &mut rng);
-        let output_key = GlweSecretKey::generate(&parameters, &mut rng);
+        let input_key = GlweSecretKey::generate(
+            parameters.size().glwe_size(),
+            parameters.secret_key_sampler(),
+            &mut rng,
+        );
+        let output_key = GlweSecretKey::generate(
+            parameters.size().glwe_size(),
+            parameters.secret_key_sampler(),
+            &mut rng,
+        );
         let input_dcrt_key = DcrtGlweSecretKey::from_coeff_secret_key(&input_key, &q_table);
         let switching_key = HybridRnsGlweKeySwitchingKey::generate(
             &input_key,

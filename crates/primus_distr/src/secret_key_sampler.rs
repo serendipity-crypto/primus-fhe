@@ -1,36 +1,22 @@
-use primus_integer::{AsInto, FheInt, FheUint, SignedInteger};
+use num_traits::{ConstOne, ConstZero};
+use primus_integer::{AsInto, FheInt, FheUint};
 use rand::distr::Bernoulli;
 
-use crate::{DiscreteGaussian, SecretKeyDistr, SignedDiscreteGaussian, ternary::TernarySampler};
+use crate::{SecretKeyDistr, SignedDiscreteGaussian, ternary::TernarySampler};
 
-/// Reusable secret-key sampler producing canonical ciphertext-modulus residues.
+/// Prepared whole-key sampling with shared signed and modular output paths.
 ///
-/// Construct with [`Self::new`]; Gaussian tables and the encoding of `-1` are
-/// retained across calls, along with binary/ternary probability thresholds.
+/// `T` is the unsigned coefficient type. The same probability thresholds and
+/// Gaussian tables produce signed `T::SignedInteger` coefficients or canonical
+/// residues modulo a caller-supplied modulus. No ciphertext modulus is stored.
 /// Fixed weights apply to the complete output slice.
-pub type EncodedSecretKeySampler<T> = SecretKeySampler<T, DiscreteGaussian<T>>;
-
-/// Reusable secret-key sampler producing signed integer coefficients.
-///
-/// Construct with [`Self::new`]; Gaussian tables and binary/ternary probability
-/// thresholds are retained across calls.
-/// This sampler is independent of a ciphertext modulus.
-pub type SignedSecretKeySampler<T> = SecretKeySampler<T, SignedDiscreteGaussian<T>>;
-
-/// Shared implementation of the encoded and signed secret-key samplers.
-/// Constructors tie the distribution, output representation and Gaussian state
-/// together; callers cannot replace individual fields. Use the encoded/signed
-/// aliases to select the Gaussian output representation. Backend selection
-/// and batch dispatch belong to the Gaussian sampler.
 #[derive(Clone)]
-pub struct SecretKeySampler<T, G> {
+pub struct SecretKeySampler<T: FheUint> {
     distr: SecretKeyDistr,
-    minus_one: T,
-    method: SamplingMethod<G>,
+    method: SamplingMethod<SignedDiscreteGaussian<T::SignedInteger>>,
 }
 
-/// Prepared state for one sampling algorithm. Dispatch stays outside coefficient
-/// loops; probability thresholds and Gaussian tables are reused across calls.
+/// Prepared state for one algorithm; dispatch stays outside coefficient loops.
 #[derive(Clone)]
 enum SamplingMethod<G> {
     UniformBinary,
@@ -51,123 +37,16 @@ enum SamplingMethod<G> {
     Gaussian(G),
 }
 
-impl<T: FheUint> EncodedSecretKeySampler<T> {
-    /// Prepares a sampler under the modulus identified by `modulus_minus_one`.
-    /// `T::MAX` denotes the native modulus `2^T::BITS`.
+impl<T: FheUint> SecretKeySampler<T> {
+    /// Prepares one distribution for both signed and encoded output.
     ///
     /// # Panics
     ///
-    /// Panics if the modulus is less than two, probabilities are
-    /// invalid, or the Gaussian cannot be constructed under this modulus.
-    /// Fixed weights are checked against the output length when sampling.
-    #[must_use]
-    pub fn new(distr: SecretKeyDistr, modulus_minus_one: T) -> Self {
-        assert!(
-            modulus_minus_one != T::ZERO,
-            "secret-key modulus must exceed one"
-        );
-        Self::prepare(distr, modulus_minus_one, |sigma| {
-            DiscreteGaussian::new(sigma, modulus_minus_one)
-                .expect("invalid encoded secret-key Gaussian distribution")
-        })
-    }
-
-    /// Samples a complete logical secret key into a newly allocated vector.
-    ///
-    /// # Panics
-    ///
-    /// Panics before sampling if a fixed weight exceeds `length` or its sum overflows.
-    #[must_use]
-    pub fn sample<R: rand::Rng + rand::CryptoRng>(&self, length: usize, rng: &mut R) -> Vec<T> {
-        if let SamplingMethod::Gaussian(gaussian) = &self.method {
-            return gaussian.sample_vec(length, rng);
-        }
-        let mut output = vec![T::ZERO; length];
-        self.sample_to(&mut output, rng);
-        output
-    }
-
-    /// Overwrites a complete logical secret key without allocating.
-    /// Fixed weights apply to the whole slice, not independently to chunks.
-    /// Randomness consumption follows the underlying vector samplers and may
-    /// change when their algorithms change. It need not match repeated scalar
-    /// sampling or be zero for empty slices. A panicking RNG may leave partially
-    /// written output.
-    ///
-    /// # Panics
-    ///
-    /// Panics before writing or sampling if a fixed weight exceeds the output
-    /// length or its sum overflows.
-    #[inline]
-    pub fn sample_to<R: rand::Rng + rand::CryptoRng>(&self, output: &mut [T], rng: &mut R) {
-        self.sample_to_with(output, rng, DiscreteGaussian::sample_to);
-    }
-}
-
-impl<T: FheInt + SignedInteger> SignedSecretKeySampler<T> {
-    /// Prepares a signed sampler without a ciphertext modulus.
-    ///
-    /// # Panics
-    ///
-    /// Panics if probabilities are invalid, or the Gaussian
-    /// cannot be constructed for `T`. Fixed weights are checked against the
-    /// output length when sampling.
+    /// Panics if probabilities are invalid or Gaussian construction violates
+    /// [`SignedDiscreteGaussian::new`]'s validity rules for `T::SignedInteger`.
+    /// Fixed weights are checked against the complete output length when sampling.
     #[must_use]
     pub fn new(distr: SecretKeyDistr) -> Self {
-        Self::prepare(distr, -T::ONE, |sigma| {
-            SignedDiscreteGaussian::new(sigma)
-                .expect("invalid signed secret-key Gaussian distribution")
-        })
-    }
-
-    /// Returns an inclusive bound on the unsigned magnitude of every sample.
-    /// Gaussian sampling uses its truncated support; binary and ternary
-    /// distributions return one, including configurations that only emit zero.
-    /// Parameters can compare this bound with a target modulus once, before
-    /// generating any keys.
-    #[must_use]
-    #[inline]
-    pub fn maximum_magnitude(&self) -> T::UnsignedInteger {
-        match &self.method {
-            SamplingMethod::Gaussian(gaussian) => gaussian.maximum_magnitude().as_into(),
-            _ => 1u8.as_into(),
-        }
-    }
-
-    /// Samples a complete logical secret key into a newly allocated vector.
-    ///
-    /// # Panics
-    ///
-    /// Panics before sampling if a fixed weight exceeds `length` or its sum overflows.
-    #[must_use]
-    pub fn sample<R: rand::Rng + rand::CryptoRng>(&self, length: usize, rng: &mut R) -> Vec<T> {
-        if let SamplingMethod::Gaussian(gaussian) = &self.method {
-            return gaussian.sample_vec(length, rng);
-        }
-        let mut output = vec![T::ZERO; length];
-        self.sample_to(&mut output, rng);
-        output
-    }
-
-    /// Overwrites a complete logical secret key without allocating.
-    /// Fixed weights apply to the whole slice, not independently to chunks.
-    /// Randomness consumption follows the underlying vector samplers and may
-    /// change when their algorithms change. It need not match repeated scalar
-    /// sampling or be zero for empty slices. A panicking RNG may leave partially
-    /// written output.
-    ///
-    /// # Panics
-    ///
-    /// Panics before writing or sampling if a fixed weight exceeds the output
-    /// length or its sum overflows.
-    #[inline]
-    pub fn sample_to<R: rand::Rng + rand::CryptoRng>(&self, output: &mut [T], rng: &mut R) {
-        self.sample_to_with(output, rng, SignedDiscreteGaussian::sample_to);
-    }
-}
-
-impl<T: FheInt, G> SecretKeySampler<T, G> {
-    fn prepare(distr: SecretKeyDistr, minus_one: T, gaussian: impl FnOnce(f64) -> G) -> Self {
         let method = match distr {
             SecretKeyDistr::UniformBinary => SamplingMethod::UniformBinary,
             SecretKeyDistr::Binary { one_probability } => SamplingMethod::Binary(
@@ -196,15 +75,12 @@ impl<T: FheInt, G> SecretKeySampler<T, G> {
                 negative_one_weight,
                 one_weight,
             },
-            SecretKeyDistr::Gaussian { standard_deviation } => {
-                SamplingMethod::Gaussian(gaussian(standard_deviation))
-            }
+            SecretKeyDistr::Gaussian { standard_deviation } => SamplingMethod::Gaussian(
+                SignedDiscreteGaussian::new(standard_deviation)
+                    .expect("invalid secret-key Gaussian distribution"),
+            ),
         };
-        Self {
-            distr,
-            minus_one,
-            method,
-        }
+        Self { distr, method }
     }
 
     /// Returns the configured coefficient distribution.
@@ -214,16 +90,123 @@ impl<T: FheInt, G> SecretKeySampler<T, G> {
         self.distr
     }
 
+    /// Returns an inclusive unsigned bound on every sample's magnitude.
+    /// Parameters must check this bound against their modulus before encoded
+    /// sampling. Gaussian uses its truncated support; binary/ternary return one.
+    #[must_use]
+    #[inline]
+    pub fn maximum_magnitude(&self) -> T {
+        match &self.method {
+            SamplingMethod::Gaussian(gaussian) => gaussian.maximum_magnitude().as_into(),
+            _ => T::ONE,
+        }
+    }
+
+    /// Samples a complete signed key into a newly allocated vector.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a fixed weight exceeds `length` or its sum overflows.
+    #[must_use]
+    pub fn sample_signed<R: rand::Rng + rand::CryptoRng>(
+        &self,
+        length: usize,
+        rng: &mut R,
+    ) -> Vec<T::SignedInteger> {
+        if let SamplingMethod::Gaussian(gaussian) = &self.method {
+            return gaussian.sample_vec(length, rng);
+        }
+        let mut output = vec![T::SignedInteger::ZERO; length];
+        self.sample_signed_to(&mut output, rng);
+        output
+    }
+
+    /// Overwrites a complete signed key without allocating.
+    /// Fixed weights apply to the whole slice, not independently to chunks.
+    /// Randomness consumption follows the underlying vector samplers and may
+    /// change with their algorithms; empty slices may consume randomness.
+    /// A panicking RNG may leave partially written output.
+    ///
+    /// # Panics
+    ///
+    /// Panics before writing or sampling if a fixed weight exceeds the output
+    /// length or its sum overflows.
+    #[inline]
+    pub fn sample_signed_to<R: rand::Rng + rand::CryptoRng>(
+        &self,
+        output: &mut [T::SignedInteger],
+        rng: &mut R,
+    ) {
+        self.sample_to_with(
+            output,
+            -T::SignedInteger::ONE,
+            rng,
+            SignedDiscreteGaussian::sample_to,
+        );
+    }
+
+    /// Samples a complete key as canonical residues into a newly allocated vector.
+    /// No intermediate signed vector is allocated.
+    ///
+    /// # Correctness
+    ///
+    /// `modulus_minus_one >= self.maximum_magnitude()` must hold. `T::MAX`
+    /// denotes the native modulus. Check this once when preparing parameters.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a fixed weight exceeds `length` or its sum overflows.
+    #[must_use]
+    pub fn sample_encoded<R: rand::Rng + rand::CryptoRng>(
+        &self,
+        length: usize,
+        modulus_minus_one: T,
+        rng: &mut R,
+    ) -> Vec<T> {
+        if let SamplingMethod::Gaussian(gaussian) = &self.method {
+            return gaussian.sample_encoded(length, modulus_minus_one, rng);
+        }
+        let mut output = vec![T::ZERO; length];
+        self.sample_encoded_to(&mut output, modulus_minus_one, rng);
+        output
+    }
+
+    /// Overwrites a complete key with canonical residues without allocating.
+    /// Fixed weights apply to the whole slice. RNG consumption follows
+    /// [`Self::sample_signed_to`]; a panicking RNG may leave partial output.
+    ///
+    /// # Correctness
+    ///
+    /// `modulus_minus_one >= self.maximum_magnitude()` must hold. `T::MAX`
+    /// denotes the native modulus. Check this once when preparing parameters.
+    ///
+    /// # Panics
+    ///
+    /// Panics before writing or sampling if a fixed weight exceeds the output
+    /// length or its sum overflows.
+    #[inline]
+    pub fn sample_encoded_to<R: rand::Rng + rand::CryptoRng>(
+        &self,
+        output: &mut [T],
+        modulus_minus_one: T,
+        rng: &mut R,
+    ) {
+        self.sample_to_with(output, modulus_minus_one, rng, |gaussian, output, rng| {
+            gaussian.sample_encoded_to(output, modulus_minus_one, rng)
+        });
+    }
+
     /// Shared distribution dispatch. The representation-specific wrapper supplies
     /// the Gaussian batch method, so this layer does not name Gaussian backends.
     // Keep this large batch switch out of callers: inlining it regressed binary
     // and dense fixed-weight cases in the sample_secret_key benchmark.
     #[inline(never)]
-    fn sample_to_with<R: rand::Rng + rand::CryptoRng>(
+    fn sample_to_with<U: FheInt, R: rand::Rng + rand::CryptoRng>(
         &self,
-        output: &mut [T],
+        output: &mut [U],
+        minus_one: U,
         rng: &mut R,
-        sample_gaussian: impl FnOnce(&G, &mut [T], &mut R),
+        sample_gaussian: impl FnOnce(&SignedDiscreteGaussian<T::SignedInteger>, &mut [U], &mut R),
     ) {
         match &self.method {
             SamplingMethod::UniformBinary => crate::sample_uniform_binary_values_to(output, rng),
@@ -231,21 +214,19 @@ impl<T: FheInt, G> SecretKeySampler<T, G> {
                 crate::binary::fill_binary(output, distribution, rng)
             }
             SamplingMethod::SparseTernary => {
-                crate::sample_sparse_ternary_values_to(output, self.minus_one, rng)
+                crate::sample_sparse_ternary_values_to(output, minus_one, rng)
             }
             SamplingMethod::UniformTernary => {
-                crate::sample_uniform_ternary_values_to(output, self.minus_one, rng)
+                crate::sample_uniform_ternary_values_to(output, minus_one, rng)
             }
-            SamplingMethod::Ternary(distribution) => {
-                distribution.sample_to(output, self.minus_one, rng)
-            }
+            SamplingMethod::Ternary(distribution) => distribution.sample_to(output, minus_one, rng),
             SamplingMethod::FixedHammingWeightBinary { hamming_weight } => {
                 crate::sample_fixed_hamming_weight_binary_values_to(output, *hamming_weight, rng)
             }
             SamplingMethod::FixedHammingWeightTernary { hamming_weight } => {
                 crate::sample_fixed_hamming_weight_ternary_values_to(
                     output,
-                    self.minus_one,
+                    minus_one,
                     *hamming_weight,
                     rng,
                 )
@@ -255,7 +236,7 @@ impl<T: FheInt, G> SecretKeySampler<T, G> {
                 one_weight,
             } => crate::sample_fixed_composition_ternary_values_to(
                 output,
-                self.minus_one,
+                minus_one,
                 *negative_one_weight,
                 *one_weight,
                 rng,

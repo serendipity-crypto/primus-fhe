@@ -13,7 +13,7 @@ use crate::{FourierGlweBootstrappingKey, TfheContext, TfheParameters, error::Tfh
 /// the order in which the evaluator applies them.
 pub struct ServerKey<T: TorusFftValue> {
     bootstrapping_key: FourierGlweBootstrappingKey<T>,
-    glwe_key_switching_key: FourierGlweKeySwitchingKey,
+    glwe_key_switching_key: FourierGlweKeySwitchingKey<T>,
 }
 
 impl<T: TorusFftValue> ServerKey<T> {
@@ -27,6 +27,8 @@ impl<T: TorusFftValue> ServerKey<T> {
             && self.glwe_key_switching_key.input_dimension() == key_switching.input_dimension()
             && self.glwe_key_switching_key.output_dimension() == key_switching.output_dimension()
             && self.glwe_key_switching_key.poly_length() == key_switching.poly_length()
+            && self.glwe_key_switching_key.output_size() == key_switching.output_size()
+            && self.glwe_key_switching_key.basis() == key_switching.output().basis()
     }
 
     /// Returns the Fourier functional bootstrapping key.
@@ -37,14 +39,19 @@ impl<T: TorusFftValue> ServerKey<T> {
 
     /// Returns the Fourier GLWE key-switching key.
     #[inline]
-    pub fn glwe_key_switching_key(&self) -> &FourierGlweKeySwitchingKey {
+    pub fn glwe_key_switching_key(&self) -> &FourierGlweKeySwitchingKey<T> {
         &self.glwe_key_switching_key
     }
 
     /// Decomposes this server key into its bootstrapping and key-switching
     /// keys.
     #[inline]
-    pub fn into_parts(self) -> (FourierGlweBootstrappingKey<T>, FourierGlweKeySwitchingKey) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        FourierGlweBootstrappingKey<T>,
+        FourierGlweKeySwitchingKey<T>,
+    ) {
         (self.bootstrapping_key, self.glwe_key_switching_key)
     }
 }
@@ -83,7 +90,11 @@ where
         let parameters = self.context.parameters();
         ClientKey::new(
             LweSecretKey::generate(parameters.small_lwe(), rng),
-            GlweSecretKey::generate(parameters.glwe(), rng),
+            GlweSecretKey::generate(
+                parameters.glwe().size(),
+                parameters.glwe().secret_key_sampler(),
+                rng,
+            ),
             parameters.pbs_order(),
         )
     }
@@ -139,7 +150,7 @@ where
         &mut self,
         client_key: &ClientKey<T>,
         rng: &mut R,
-    ) -> FourierGlweKeySwitchingKey
+    ) -> FourierGlweKeySwitchingKey<T>
     where
         R: rand::Rng + rand::CryptoRng,
     {

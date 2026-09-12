@@ -82,6 +82,10 @@ Input and output lengths are exact:
 
 Incorrect lengths or incompatible workspace cause a panic.
 
+`FftTable::automorphism_map(degree)` allocates the Fourier map for `X -> X^degree`, where `degree` is odd and in `[1, 2N)`. Entry `j` gives `(source, conjugate)` for output `j`.
+
+Build and cache the map during evaluation-key construction, and reuse the originating table instance. Custom `FftTable` implementations must provide the map for their own storage order. Applying the map alone does not perform cryptographic key switching.
+
 ## Length and precision
 
 `FftTable::new(log_n)` accepts `2 <= log_n <= usize::BITS - 1`, so the minimum

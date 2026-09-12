@@ -1,6 +1,6 @@
 use primus_glwe::{
-    GlevParameters, GlweParameters, GlweSecretKey, NttGadgetDomain, NttGadgetEncryptContext,
-    NttGlweSecretKey, SecretKeyDistr,
+    GlevParameters, GlweParameters, GlweSecretKey, NttGadgetEncryptContext, NttGlweSecretKey,
+    SecretKeyDistr,
 };
 use primus_lattice::{
     glwe::{Glwe, NttGlwe},
@@ -11,6 +11,7 @@ use primus_modulus::BarrettModulus;
 use primus_ntt::{NttTable, UintNttTable};
 use primus_poly::Polynomial;
 use primus_tfhe_glwe_ntt::{NttGlweBlindRotationContext, NttGlweBootstrappingKey};
+use rand::{SeedableRng, rngs::StdRng};
 
 const LWE_DIMENSION: usize = 4;
 const GLWE_DIMENSION: usize = 1;
@@ -47,7 +48,7 @@ fn functional_bootstrapping_key_blind_rotates() {
 
     let modulus = BarrettModulus::new(MODULUS);
     let ntt = UintNttTable::new(POLY_LENGTH.trailing_zeros(), modulus).unwrap();
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     let lwe_params = LweParameters::new(
         LWE_DIMENSION,
         PLAINTEXT_MODULUS,
@@ -64,16 +65,20 @@ fn functional_bootstrapping_key_blind_rotates() {
         0.7,
     );
     let ggsw_params = GlevParameters::with_glwe_params(&glwe_params, 8, None);
-    let domain = NttGadgetDomain::try_new(&ggsw_params, &ntt).unwrap();
     let input_secret_key = LweSecretKey::new(vec![1u32, 0, 1, 1], SecretKeyDistr::UniformBinary);
-    let coeff_output_secret_key = GlweSecretKey::generate(&glwe_params, &mut rng);
+    let coeff_output_secret_key = GlweSecretKey::generate(
+        glwe_params.size(),
+        glwe_params.secret_key_sampler(),
+        &mut rng,
+    );
     let output_secret_key = NttGlweSecretKey::from_coeff_secret_key(&coeff_output_secret_key, &ntt);
-    let mut gadget_context = NttGadgetEncryptContext::new(domain.size());
+    let mut gadget_context = NttGadgetEncryptContext::new(ggsw_params.size());
     let key = NttGlweBootstrappingKey::generate_ntt(
         &input_secret_key,
         &lwe_params,
         &output_secret_key,
-        &domain,
+        &ggsw_params,
+        &ntt,
         &mut rng,
         &mut gadget_context,
     );
@@ -101,12 +106,13 @@ fn functional_bootstrapping_key_blind_rotates() {
     let accumulator = accumulator_ntt.into_coeff_form(&ntt);
 
     let mut output: Glwe<Vec<u32>> = Glwe::zero(ggsw_params.glwe_len());
-    let mut blind_rotation_context = NttGlweBlindRotationContext::new(domain.size());
+    let mut blind_rotation_context = NttGlweBlindRotationContext::new(ggsw_params.size());
     key.ntt_blind_rotate_to(
         &input,
         &accumulator,
         &mut output,
-        &domain,
+        modulus,
+        &ntt,
         &mut blind_rotation_context,
     );
 
@@ -125,7 +131,8 @@ fn functional_bootstrapping_key_blind_rotates() {
         &exponent_input,
         &accumulator,
         &mut direct_output,
-        &domain,
+        modulus,
+        &ntt,
         &mut blind_rotation_context,
     );
     let direct_output_ntt = direct_output.into_ntt_form(&ntt);
@@ -135,4 +142,68 @@ fn functional_bootstrapping_key_blind_rotates() {
             .as_ref(),
         rotate_plaintext(&message, expected_exponent)
     );
+
+    // Resource validation must precede accumulator initialization, including LUT paths.
+    let wrong_modulus = BarrettModulus::new(998_244_353u32);
+    let wrong_modulus_table =
+        UintNttTable::new(POLY_LENGTH.trailing_zeros(), wrong_modulus).unwrap();
+    let wrong_length_table =
+        UintNttTable::new((POLY_LENGTH * 2).trailing_zeros(), modulus).unwrap();
+    let lookup_table = Polynomial::new(message.as_slice());
+    for (modulus, table, size) in [
+        (modulus, &wrong_modulus_table, ggsw_params.size()),
+        (wrong_modulus, &wrong_modulus_table, ggsw_params.size()),
+        (modulus, &wrong_length_table, ggsw_params.size()),
+        (
+            modulus,
+            &ntt,
+            primus_glwe::GadgetSize::new(glwe_params.size(), ggsw_params.decompose_length() + 1),
+        ),
+    ] {
+        blind_rotation_context.resize(size);
+        for path in 0..4 {
+            let mut output = Glwe::new(vec![7u32; ggsw_params.glwe_len()]);
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    match path {
+                        0 => key.ntt_blind_rotate_to(
+                            &input,
+                            &accumulator,
+                            &mut output,
+                            modulus,
+                            table,
+                            &mut blind_rotation_context,
+                        ),
+                        1 => key.ntt_blind_rotate_exponents_to(
+                            &exponent_input,
+                            &accumulator,
+                            &mut output,
+                            modulus,
+                            table,
+                            &mut blind_rotation_context,
+                        ),
+                        2 => key.ntt_blind_rotate_lookup_table_to(
+                            &input,
+                            &lookup_table,
+                            &mut output,
+                            modulus,
+                            table,
+                            &mut blind_rotation_context,
+                        ),
+                        _ => key.ntt_blind_rotate_many_lookup_table_to(
+                            &input,
+                            &lookup_table,
+                            1,
+                            &mut output,
+                            modulus,
+                            table,
+                            &mut blind_rotation_context,
+                        ),
+                    }
+                }))
+                .is_err()
+            );
+            assert_eq!(output.as_ref(), vec![7u32; ggsw_params.glwe_len()]);
+        }
+    }
 }

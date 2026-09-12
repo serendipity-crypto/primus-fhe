@@ -3,11 +3,19 @@ use primus_fft::{FftTable, RustFftTable};
 use primus_glwe::{GgswParameters, GlweParameters, SecretKeyDistr};
 use primus_lwe::LweParameters;
 use primus_modulus::NativeModulus;
-use primus_tfhe_glwe_fourier::{PbsOrder, TfheContext, TfheContextError, TfheParameters};
+use primus_tfhe_glwe_fourier::{
+    PbsOrder, TfheContext, TfheContextError, TfheEvaluationError, TfheParameters,
+};
+
+use rand::{SeedableRng, rngs::StdRng};
 
 const POLY_LENGTH: usize = 256;
 
 fn parameters(order: PbsOrder) -> TfheParameters<u32> {
+    parameters_with_key_switch_basis(order, 4)
+}
+
+fn parameters_with_key_switch_basis(order: PbsOrder, log_basis: u32) -> TfheParameters<u32> {
     let lwe = LweParameters::new(
         4,
         4,
@@ -28,7 +36,7 @@ fn parameters(order: PbsOrder) -> TfheParameters<u32> {
         lwe,
         glwe,
         bootstrapping,
-        ApproxSignedBasis::new(None, 4, Some(4)),
+        ApproxSignedBasis::new(None, log_basis, Some(4)),
         order,
     )
     .unwrap()
@@ -55,7 +63,7 @@ fn evaluates_both_programmable_bootstrap_orders() {
     for order in [PbsOrder::BootstrapKeyswitch, PbsOrder::KeyswitchBootstrap] {
         let table = RustFftTable::new(POLY_LENGTH.trailing_zeros()).unwrap();
         let context = TfheContext::try_new(parameters(order), table).unwrap();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let (client_key, server_key) = context.generate_keys(&mut rng).unwrap();
         let encryptor = context.encryptor(&client_key).unwrap();
         let decryptor = context.decryptor(&client_key).unwrap();
@@ -66,4 +74,24 @@ fn evaluates_both_programmable_bootstrap_orders() {
         let output = evaluator.apply_lookup_table(&input, &lookup_table);
         assert_eq!(decryptor.decrypt::<u32>(&output).unwrap(), 1);
     }
+}
+
+#[test]
+fn server_keys_are_bound_to_their_key_switching_basis() {
+    let source = TfheContext::try_new(
+        parameters(PbsOrder::BootstrapKeyswitch),
+        RustFftTable::new(POLY_LENGTH.trailing_zeros()).unwrap(),
+    )
+    .unwrap();
+    let mut rng = StdRng::seed_from_u64(42);
+    let (_, server_key) = source.generate_keys(&mut rng).unwrap();
+    let incompatible = TfheContext::try_new(
+        parameters_with_key_switch_basis(PbsOrder::BootstrapKeyswitch, 5),
+        RustFftTable::new(POLY_LENGTH.trailing_zeros()).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        incompatible.evaluator(&server_key),
+        Err(TfheEvaluationError::IncompatibleServerKey)
+    ));
 }

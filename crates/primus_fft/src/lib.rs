@@ -1,6 +1,7 @@
 #![deny(missing_docs)]
 //! Negacyclic FFT wrappers for `Z[X] / (X^N + 1)`.
 
+mod automorphism;
 mod error;
 mod table;
 mod torus;

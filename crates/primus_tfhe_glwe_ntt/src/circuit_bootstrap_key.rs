@@ -1,8 +1,6 @@
 //! Evaluation keys for patched NTT circuit bootstrapping.
 
-use primus_glwe::{
-    GadgetSize, NttGadgetDomain, NttGlweSchemeSwitchKey, NttGlweSecretKey, NttGlweTraceKey,
-};
+use primus_glwe::{GadgetSize, NttGlweSchemeSwitchKey, NttGlweSecretKey, NttGlweTraceKey};
 use primus_integer::FheUint;
 use primus_ntt::NttTable;
 
@@ -19,7 +17,7 @@ pub enum CircuitBootstrapKeyError {
     ClientKey(#[from] TfheKeyError),
 }
 
-/// HomTrace and scheme-switching keys used after PBSManyLUT.
+/// Trace-projection and scheme-switching keys used after PBSManyLUT.
 ///
 /// The ordinary PBS bootstrapping key remains in [`crate::ServerKey`]. This
 /// object contains only the additional, optional circuit-bootstrapping
@@ -43,7 +41,7 @@ impl<T: FheUint> CircuitBootstrapKey<T> {
             && self.scheme_switch.key_size() == parameters.scheme_switch().size()
     }
 
-    /// Returns the HomTrace key.
+    /// Returns the trace key used for reverse-trace coefficient projection.
     #[inline]
     pub fn trace_key(&self) -> &NttGlweTraceKey<T> {
         &self.trace
@@ -61,7 +59,7 @@ where
     T: FheUint,
     Table: NttTable<ValueT = T>,
 {
-    /// Generates the optional HomTrace and scheme-switching keys.
+    /// Generates the optional trace-projection and scheme-switching keys.
     pub fn try_generate_circuit_bootstrap_key<R>(
         &mut self,
         client_key: &ClientKey<T>,
@@ -81,26 +79,23 @@ where
         let ntt_secret_key =
             NttGlweSecretKey::from_coeff_secret_key(coeff_secret_key, self.context.table());
 
-        let trace_domain = NttGadgetDomain::try_new(parameters.trace(), self.context.table())
-            .expect("validated circuit-bootstrap trace domain must match the NTT table");
-        self.gadget.resize(trace_domain.size());
+        self.gadget.resize(parameters.trace().size());
         let trace = NttGlweTraceKey::generate(
             coeff_secret_key,
             &ntt_secret_key,
-            &trace_domain,
+            parameters.trace(),
+            self.context.table(),
             rng,
             &mut self.gadget,
         );
 
-        let scheme_switch_domain =
-            NttGadgetDomain::try_new(parameters.scheme_switch(), self.context.table())
-                .expect("validated scheme-switch domain must match the NTT table");
-        self.gadget.resize(scheme_switch_domain.size());
+        self.gadget.resize(parameters.scheme_switch().size());
         let scheme_switch = NttGlweSchemeSwitchKey::generate(
             coeff_secret_key,
             &ntt_secret_key,
-            &scheme_switch_domain,
             parameters.output_size(),
+            parameters.scheme_switch(),
+            self.context.table(),
             rng,
             &mut self.gadget,
         );

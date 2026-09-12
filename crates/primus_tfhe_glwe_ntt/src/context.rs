@@ -1,4 +1,3 @@
-use primus_glwe::NttGadgetDomain;
 use primus_integer::FheUint;
 use primus_ntt::NttTable;
 use primus_tfhe::{LookupTable, ManyLookupTable};
@@ -61,24 +60,6 @@ where
         &self.table
     }
 
-    /// Returns the checked NTT domain used by GLWE key switching.
-    #[inline]
-    pub fn key_switching_domain(
-        &self,
-    ) -> NttGadgetDomain<'_, T, primus_modulus::BarrettModulus<T>, Table> {
-        NttGadgetDomain::try_new(self.parameters.glwe_key_switching().output(), &self.table)
-            .expect("TfheContext must contain a compatible key-switching domain")
-    }
-
-    /// Returns the checked NTT domain used by bootstrapping.
-    #[inline]
-    pub fn bootstrapping_domain(
-        &self,
-    ) -> NttGadgetDomain<'_, T, primus_modulus::BarrettModulus<T>, Table> {
-        NttGadgetDomain::try_new(self.parameters.bootstrapping(), &self.table)
-            .expect("TfheContext must contain a compatible bootstrapping domain")
-    }
-
     /// Generates a fresh compatible client/server key pair.
     pub fn generate_keys<R>(
         &self,
@@ -114,7 +95,7 @@ where
         Evaluator::try_new(self, server_key)
     }
 
-    /// Generates the optional HomTrace and scheme-switching key material.
+    /// Generates the optional trace-projection and scheme-switching key material.
     pub fn generate_circuit_bootstrap_key<R>(
         &self,
         client_key: &ClientKey<T>,

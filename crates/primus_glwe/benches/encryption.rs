@@ -1,0 +1,232 @@
+//! Complete-operation latency with reusable outputs, keys, tables and workspaces.
+//! Sampling, encoding/decoding and required transforms remain inside timing.
+//! Codec variants are measured in primus_encoding/benches/plaintext_codec.rs.
+//!
+//! Cases use u64, binary keys, noise sigma 3.2 and plaintext modulus 16;
+//! NTT uses q = 1_125_899_906_826_241, Fourier uses the native torus.
+//! These are regression workloads, not matched-security backend comparisons.
+//!
+//! cargo bench -p primus_glwe --bench encryption
+//! cargo bench -p primus_glwe --bench encryption -- encrypt_ggsw_to
+
+use criterion::{Criterion, criterion_group, criterion_main};
+use primus_fft::{FftEngine, FftTable, RustFftTable};
+use primus_glwe::{
+    FourierGadgetEncryptContext, FourierGgswCiphertext, FourierGlevCiphertext,
+    FourierGlweDecryptContext, FourierGlweEncryptContext, FourierGlweSecretKey, GlevParameters,
+    GlweParameters, NttGadgetEncryptContext, NttGgswCiphertext, NttGlevCiphertext,
+    NttGlwePublicEncryptContext, NttGlwePublicKey, NttGlweSecretKey, SecretKeyDistr,
+};
+use primus_modulus::{BarrettModulus, NativeModulus};
+use primus_ntt::{NttTable, UintNttTable};
+use primus_poly::Polynomial;
+use rand::{SeedableRng, rngs::StdRng};
+use std::{hint::black_box, time::Duration};
+
+const SIZES: [(usize, usize); 2] = [(1, 1024), (2, 4096)];
+const LOG_BASE: u32 = 10;
+const LEVELS: usize = 3;
+
+fn ntt_encryption(c: &mut Criterion) {
+    for (dimension, n) in SIZES {
+        let mut rng = StdRng::seed_from_u64(42);
+        let message = Polynomial::new((0..n).map(|i| (i % 16) as u64).collect::<Vec<_>>());
+        let mut plaintext = Polynomial::new(vec![0u64; n]);
+        let modulus = BarrettModulus::new(1_125_899_906_826_241u64);
+        let params = GlweParameters::new(
+            dimension,
+            n,
+            16,
+            modulus,
+            SecretKeyDistr::UniformBinary,
+            3.2,
+        );
+        let ntt = UintNttTable::new(n.trailing_zeros(), modulus).unwrap();
+        let sk = NttGlweSecretKey::generate(&params, &ntt, &mut rng);
+        let pk = NttGlwePublicKey::generate(&sk, &params, &ntt, &mut rng);
+        let mut public_context = NttGlwePublicEncryptContext::new(n);
+        let mut ciphertext = sk.encrypt(&message, &params, &ntt, &mut rng);
+        sk.decrypt_to(&ciphertext, &mut plaintext, &params, &ntt);
+        assert_eq!(plaintext.as_ref(), message.as_ref());
+        let decrypt_input = ciphertext.clone();
+        let gadget = GlevParameters::with_glwe_params(&params, LOG_BASE, Some(LEVELS));
+        let mut gadget_context = NttGadgetEncryptContext::new(gadget.size());
+        let mut glev = NttGlevCiphertext::<Vec<u64>>::zero(gadget.glev_len());
+        let mut ggsw = NttGgswCiphertext::<Vec<u64>>::zero(gadget.ggsw_len());
+        let mut group = c.benchmark_group(format!("glwe/ntt/k{dimension}_n{n}"));
+        group.bench_function("encrypt_sk_to", |b| {
+            b.iter(|| {
+                sk.encrypt_to(
+                    black_box(&message),
+                    &mut ciphertext,
+                    black_box(&params),
+                    &ntt,
+                    &mut rng,
+                );
+                black_box(ciphertext.as_ref());
+            })
+        });
+        group.bench_function("encrypt_pk_to", |b| {
+            b.iter(|| {
+                pk.encrypt_to(
+                    black_box(&message),
+                    &mut ciphertext,
+                    black_box(&params),
+                    &ntt,
+                    &mut rng,
+                    &mut public_context,
+                );
+                black_box(ciphertext.as_ref());
+            })
+        });
+        group.bench_function("decrypt_to", |b| {
+            b.iter(|| {
+                sk.decrypt_to(
+                    black_box(&decrypt_input),
+                    &mut plaintext,
+                    black_box(&params),
+                    &ntt,
+                );
+                black_box(plaintext.as_ref());
+            })
+        });
+        group.bench_function(
+            format!("encrypt_glev_to/log_base{LOG_BASE}_levels{LEVELS}"),
+            |b| {
+                b.iter(|| {
+                    sk.encrypt_glev_to(
+                        black_box(&message),
+                        &mut glev,
+                        &gadget,
+                        &ntt,
+                        &mut rng,
+                        &mut gadget_context,
+                    );
+                    black_box(glev.as_ref());
+                })
+            },
+        );
+        group.bench_function(
+            format!("encrypt_ggsw_to/log_base{LOG_BASE}_levels{LEVELS}"),
+            |b| {
+                b.iter(|| {
+                    sk.encrypt_ggsw_to(
+                        black_box(&message),
+                        &mut ggsw,
+                        &gadget,
+                        &ntt,
+                        &mut rng,
+                        &mut gadget_context,
+                    );
+                    black_box(ggsw.as_ref());
+                })
+            },
+        );
+        group.finish();
+    }
+}
+
+fn fourier_encryption(c: &mut Criterion) {
+    for (dimension, n) in SIZES {
+        let mut rng = StdRng::seed_from_u64(42);
+        let message = Polynomial::new((0..n).map(|i| (i % 16) as u64).collect::<Vec<_>>());
+        let mut plaintext = Polynomial::new(vec![0u64; n]);
+        let params = GlweParameters::new(
+            dimension,
+            n,
+            16,
+            NativeModulus::<u64>::new(),
+            SecretKeyDistr::UniformBinary,
+            3.2,
+        );
+        let table = RustFftTable::new(n.trailing_zeros()).unwrap();
+        let mut fft = FftEngine::new(&table);
+        let sk = FourierGlweSecretKey::generate(&params, &mut fft, &mut rng);
+        let mut encrypt_context = FourierGlweEncryptContext::new(n);
+        let mut decrypt_context = FourierGlweDecryptContext::new(n);
+        let mut ciphertext =
+            sk.encrypt(&message, &params, &mut fft, &mut rng, &mut encrypt_context);
+        sk.decrypt_to(
+            &ciphertext,
+            &mut plaintext,
+            &params,
+            &mut fft,
+            &mut decrypt_context,
+        );
+        assert_eq!(plaintext.as_ref(), message.as_ref());
+        let decrypt_input = ciphertext.clone();
+        let gadget = GlevParameters::with_glwe_params(&params, LOG_BASE, Some(LEVELS));
+        let mut gadget_context = FourierGadgetEncryptContext::new(gadget.size());
+        let mut glev = FourierGlevCiphertext::<Vec<_>>::zero(gadget.fourier_glev_len());
+        let mut ggsw = FourierGgswCiphertext::<Vec<_>>::zero(gadget.fourier_ggsw_len());
+        let mut group = c.benchmark_group(format!("glwe/fourier/k{dimension}_n{n}"));
+        group.bench_function("encrypt_sk_to", |b| {
+            b.iter(|| {
+                sk.encrypt_to(
+                    black_box(&message),
+                    &mut ciphertext,
+                    black_box(&params),
+                    &mut fft,
+                    &mut rng,
+                    &mut encrypt_context,
+                );
+                black_box(ciphertext.as_ref());
+            })
+        });
+        group.bench_function("decrypt_to", |b| {
+            b.iter(|| {
+                sk.decrypt_to(
+                    black_box(&decrypt_input),
+                    &mut plaintext,
+                    black_box(&params),
+                    &mut fft,
+                    &mut decrypt_context,
+                );
+                black_box(plaintext.as_ref());
+            })
+        });
+        group.bench_function(
+            format!("encrypt_glev_to/log_base{LOG_BASE}_levels{LEVELS}"),
+            |b| {
+                b.iter(|| {
+                    sk.encrypt_glev_to(
+                        black_box(&message),
+                        &mut glev,
+                        &gadget,
+                        &mut fft,
+                        &mut rng,
+                        &mut gadget_context,
+                    );
+                    black_box(glev.as_ref());
+                })
+            },
+        );
+        group.bench_function(
+            format!("encrypt_ggsw_to/log_base{LOG_BASE}_levels{LEVELS}"),
+            |b| {
+                b.iter(|| {
+                    sk.encrypt_ggsw_to(
+                        black_box(&message),
+                        &mut ggsw,
+                        &gadget,
+                        &mut fft,
+                        &mut rng,
+                        &mut gadget_context,
+                    );
+                    black_box(ggsw.as_ref());
+                })
+            },
+        );
+        group.finish();
+    }
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .sample_size(50)
+        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(2));
+    targets = ntt_encryption, fourier_encryption
+}
+criterion_main!(benches);

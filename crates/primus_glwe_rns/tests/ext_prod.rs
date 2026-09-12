@@ -8,7 +8,7 @@ use primus_ntt::UintDcrtTable;
 use primus_poly::Polynomial;
 use primus_reduce::ReduceNegSlice;
 use primus_rns::Residues;
-use rand::RngExt;
+use rand::{SeedableRng, rngs::StdRng};
 
 /// Test GLWE external product: c₂ = GGSW(monomial) ⊡ GLWE(plaintext).
 ///
@@ -33,9 +33,8 @@ fn test_external_product() {
     let moduli = moduli_values.map(<BarrettModulus<ValueT>>::new);
     let table = UintDcrtTable::new(log_n, &moduli).unwrap();
 
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
 
-    // ── Parameters ──────────────────────────────────────────────
     let glwe_params = CrtGlweParameters::new(
         dimension,
         poly_length,
@@ -49,23 +48,22 @@ fn test_external_product() {
     let rns_glwe_len = glwe_params.rns_glwe_len();
     let base_q = glwe_params.base_q();
 
-    let sk = GlweSecretKey::generate(&glwe_params, &mut rng);
+    let sk = GlweSecretKey::generate(
+        glwe_params.size().glwe_size(),
+        glwe_params.secret_key_sampler(),
+        &mut rng,
+    );
     let dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&sk, &table);
 
-    // ── Decomposition basis and public key ──────────────────────
     let glev_params = CrtGlevParameters::with_glwe_params(&glwe_params, 30, None);
 
     let pk = DcrtGlwePublicKey::new(&dcrt_sk, &glwe_params, &table, &mut rng);
 
-    // Run 20 iterations with random messages and rotation degrees.
-    for _ in 0..20 {
-        let degree = rng.random_range(0..poly_length);
-
-        // ── GGSW encrypts the monomial X^d ──────────────────────
+    // Identity, one-position shift and sign-wrapping boundary.
+    for degree in [0, 1, poly_length - 1] {
         let ggsw =
             pk.encrypt_monomial_ggsw(&Residues([1, 1]), degree, &glev_params, &table, &mut rng);
 
-        // ── Encrypt a random plaintext m(X) ─────────────────────
         let input: Polynomial<Vec<ValueT>> = Polynomial::random(poly_length, mod_t, &mut rng);
         let mut c1: DcrtGlwe<Vec<ValueT>> = DcrtGlweCiphertext::zero(rns_glwe_len);
         let mut c2: DcrtGlwe<Vec<ValueT>> = DcrtGlweCiphertext::zero(rns_glwe_len);
@@ -75,7 +73,6 @@ fn test_external_product() {
 
         dcrt_sk.encrypt_plaintext_inplace(&input, &mut c1, &glwe_params, &table, &mut rng);
 
-        // ── External product: GGSW ⊡ GLWE → rotated plaintext ───
         // Requires coefficient-domain input.
         let c1 = c1.into_coeff_form(&table);
 
@@ -88,7 +85,6 @@ fn test_external_product() {
             &mut glev_context,
         );
 
-        // ── Expected: m(X)·X^d = rotate_right(d) with first d coeffs negated ──
         let mut input_rt = input.clone();
         input_rt.as_mut_slice().rotate_right(degree);
         mod_t.reduce_neg_slice_assign(&mut input_rt.as_mut_slice()[..degree]);
